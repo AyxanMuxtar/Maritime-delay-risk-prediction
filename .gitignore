@@ -30,3 +30,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Explicitly Requested
+daily-briefs/
+readme.md
+README.md
+

@@ -44,9 +44,14 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # ── Default config (overridden by src/config.py values when passed in) ────────
-_HISTORICAL_URL = "https://archive-api.open-meteo.com/v1/archive"
-_FORECAST_URL   = "https://api.open-meteo.com/v1/forecast"
-_MARINE_URL     = "https://marine-api.open-meteo.com/v1/marine"
+_HISTORICAL_URL          = "https://archive-api.open-meteo.com/v1/archive"
+_HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+_FORECAST_URL            = "https://api.open-meteo.com/v1/forecast"
+_MARINE_URL              = "https://marine-api.open-meteo.com/v1/marine"
+
+# Visibility is only in the historical-forecast-api, from this date onwards.
+# Earlier dates must use the fog_proxy feature.
+_VISIBILITY_AVAILABLE_FROM = "2022-01-01"
 
 _DEFAULT_TIMEOUT    = 30
 _DEFAULT_MAX_RETRY  = 3
@@ -402,6 +407,242 @@ def fetch_all_cities(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Hourly visibility fetch & aggregation (historical-forecast-api)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def fetch_historical_forecast_hourly(
+    city:      str,
+    lat:       float,
+    lon:       float,
+    start:     str,
+    end:       str,
+    variables: list[str],
+    timezone:  str = "auto",
+    timeout:   int = _DEFAULT_TIMEOUT,
+    max_retries: int = _DEFAULT_MAX_RETRY,
+) -> pd.DataFrame:
+    """
+    Fetch HOURLY data from the Open-Meteo historical-forecast endpoint.
+
+    This endpoint archives high-resolution forecast model data from ~2022
+    onwards and INCLUDES visibility (which the archive endpoint does not).
+
+    Parameters
+    ----------
+    city       : City name
+    lat, lon   : Decimal coordinates
+    start, end : ISO date strings 'YYYY-MM-DD'
+                 (must be >= _VISIBILITY_AVAILABLE_FROM for visibility)
+    variables  : Hourly variable names, e.g. ['visibility']
+    timezone   : 'auto' or IANA string
+
+    Returns
+    -------
+    pd.DataFrame with columns: [datetime, city, <variable>, ...]
+    Note: index is hourly, NOT daily. Use aggregate_hourly_visibility()
+    to convert to daily.
+    """
+    _validate_date_range(start, end)
+
+    if pd.Timestamp(start) < pd.Timestamp(_VISIBILITY_AVAILABLE_FROM):
+        logger.warning(
+            "Requested start date %s is before %s. "
+            "Historical-forecast-api may not have data that far back. "
+            "Older periods will use fog_proxy feature instead.",
+            start, _VISIBILITY_AVAILABLE_FROM,
+        )
+
+    params = {
+        "latitude":   lat,
+        "longitude":  lon,
+        "start_date": start,
+        "end_date":   end,
+        "hourly":     ",".join(variables),
+        "timezone":   timezone,
+    }
+
+    logger.info("→ Fetching hourly hist-forecast  %-15s  %s → %s  (%d vars)",
+                city, start, end, len(variables))
+
+    payload = _http_get(_HISTORICAL_FORECAST_URL, params, timeout, max_retries)
+
+    hourly = payload.get("hourly")
+    if not hourly:
+        raise RuntimeError(
+            f"historical-forecast-api response for '{city}' has no 'hourly' section. "
+            f"Keys present: {list(payload.keys())}"
+        )
+
+    df = pd.DataFrame(hourly)
+    if "time" not in df.columns:
+        raise RuntimeError(
+            f"'hourly' section for '{city}' has no 'time' column."
+        )
+
+    df = df.rename(columns={"time": "datetime"})
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df.insert(0, "city", city)
+
+    # Coerce numerics
+    for col in df.columns:
+        if col not in ("datetime", "city"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    logger.info(
+        "  ✓ %-15s  %d hourly rows  %s → %s",
+        city, len(df),
+        df["datetime"].min(), df["datetime"].max(),
+    )
+    return df.sort_values("datetime").reset_index(drop=True)
+
+
+def aggregate_hourly_visibility(
+    hourly_df:        pd.DataFrame,
+    low_vis_threshold: float = 1000.0,
+) -> pd.DataFrame:
+    """
+    Aggregate hourly visibility to daily statistics.
+
+    Parameters
+    ----------
+    hourly_df        : DataFrame with 'datetime', 'city', 'visibility' columns
+                       (output of fetch_historical_forecast_hourly)
+    low_vis_threshold: Metres — count hours below this as fog hours
+
+    Returns
+    -------
+    pd.DataFrame indexed by (date, city) with columns:
+        visibility_mean              — mean daily visibility (m)
+        visibility_min               — worst hour of the day (m)
+        visibility_hours_below_1km   — count of hours below threshold
+    """
+    if "visibility" not in hourly_df.columns:
+        raise ValueError(
+            "hourly_df must contain a 'visibility' column. "
+            f"Found: {list(hourly_df.columns)}"
+        )
+
+    df = hourly_df.copy()
+    df["date"] = df["datetime"].dt.normalize()
+
+    daily = (
+        df.groupby(["date", "city"])["visibility"]
+          .agg(
+              visibility_mean="mean",
+              visibility_min="min",
+              visibility_hours_below_1km=lambda s: int((s < low_vis_threshold).sum()),
+          )
+          .reset_index()
+    )
+    daily["visibility_mean"] = daily["visibility_mean"].round(1)
+    daily["visibility_min"]  = daily["visibility_min"].round(1)
+    return daily
+
+
+def merge_visibility_into_daily(
+    daily_df:       pd.DataFrame,
+    visibility_df:  pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Left-merge aggregated daily visibility columns into the main daily weather
+    DataFrame on (date, city). Rows outside visibility coverage will have NaN
+    in visibility_* columns — this is expected and handled by fog_proxy in Day 4.
+
+    Parameters
+    ----------
+    daily_df      : Main daily weather DataFrame (from fetch_historical)
+                    Must have 'date' and 'city' columns.
+    visibility_df : Aggregated daily visibility (from aggregate_hourly_visibility)
+
+    Returns
+    -------
+    pd.DataFrame with original columns + visibility_mean, visibility_min,
+    visibility_hours_below_1km
+    """
+    if "date" not in daily_df.columns or "city" not in daily_df.columns:
+        raise ValueError("daily_df must have 'date' and 'city' columns")
+
+    # Normalize dates to midnight so merge works
+    d1 = daily_df.copy()
+    d1["date"] = pd.to_datetime(d1["date"]).dt.normalize()
+    d2 = visibility_df.copy()
+    d2["date"] = pd.to_datetime(d2["date"]).dt.normalize()
+
+    merged = d1.merge(d2, on=["date", "city"], how="left")
+
+    n_covered = merged["visibility_mean"].notna().sum()
+    n_total   = len(merged)
+    logger.info(
+        "Visibility merge: %d/%d rows have visibility data (%.1f%%)",
+        n_covered, n_total, n_covered / n_total * 100 if n_total else 0,
+    )
+    return merged
+
+
+def fetch_and_merge_visibility(
+    daily_df:     pd.DataFrame,
+    cities:       dict,
+    timezone_key: str = "timezone",
+) -> pd.DataFrame:
+    """
+    End-to-end convenience wrapper:
+      1. Determine date range from daily_df
+      2. For dates >= _VISIBILITY_AVAILABLE_FROM, fetch hourly visibility
+         from historical-forecast-api for each city
+      3. Aggregate to daily
+      4. Merge back into daily_df
+
+    Returns
+    -------
+    pd.DataFrame with visibility_mean, visibility_min,
+    visibility_hours_below_1km columns added (NaN where unavailable).
+    """
+    d = daily_df.copy()
+    d["date"] = pd.to_datetime(d["date"])
+
+    earliest = d["date"].min()
+    latest   = d["date"].max()
+    cutoff   = pd.Timestamp(_VISIBILITY_AVAILABLE_FROM)
+
+    if latest < cutoff:
+        logger.warning(
+            "All dates (%s → %s) are before visibility cutoff (%s). "
+            "Returning daily_df unchanged — use fog_proxy for fog risk.",
+            earliest.date(), latest.date(), cutoff.date(),
+        )
+        return d
+
+    vis_start = max(earliest, cutoff).strftime("%Y-%m-%d")
+    vis_end   = latest.strftime("%Y-%m-%d")
+
+    all_hourly: list[pd.DataFrame] = []
+    for city, meta in cities.items():
+        if city not in d["city"].unique():
+            continue
+        try:
+            h = fetch_historical_forecast_hourly(
+                city=city,
+                lat=meta["lat"],
+                lon=meta["lon"],
+                start=vis_start,
+                end=vis_end,
+                variables=["visibility"],
+                timezone=meta.get(timezone_key, "auto"),
+            )
+            all_hourly.append(h)
+        except Exception as exc:                             # noqa: BLE001
+            logger.error("Visibility fetch FAILED for %s: %s", city, exc)
+
+    if not all_hourly:
+        logger.warning("No visibility data fetched. Returning daily_df unchanged.")
+        return d
+
+    hourly_combined = pd.concat(all_hourly, ignore_index=True)
+    vis_daily       = aggregate_hourly_visibility(hourly_combined)
+    return merge_visibility_into_daily(d, vis_daily)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Persistence helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -533,17 +774,40 @@ def audit_dataframe(
         )
 
     # Null counts — only report columns that actually have nulls
+    # Visibility columns are expected to be null before 2022-01-01 (the
+    # historical-forecast-api doesn't cover earlier dates). These are NOT
+    # treated as warnings.
+    _EXPECTED_NULL_COLS_BEFORE_2022 = {
+        "visibility_mean", "visibility_min", "visibility_hours_below_1km",
+    }
+    _VISIBILITY_CUTOFF = pd.Timestamp("2022-01-01")
+
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     null_counts  = df[numeric_cols].isnull().sum().to_dict()
-    # Filter to only columns with at least 1 null before reporting
     null_counts_nonzero = {k: v for k, v in null_counts.items() if v > 0}
-    total_nulls  = sum(null_counts_nonzero.values())
 
-    if total_nulls > 0:
-        top_nulls = sorted(null_counts_nonzero.items(), key=lambda x: -x[1])[:5]
-        top_str = ", ".join(f"{col}={cnt} ({cnt/len(df)*100:.1f}%)" for col, cnt in top_nulls)
+    # Split nulls into expected vs unexpected
+    pre_2022_rows = (df["date"] < _VISIBILITY_CUTOFF).sum()
+    expected_nulls:   dict[str, int] = {}
+    unexpected_nulls: dict[str, int] = {}
+
+    for col, cnt in null_counts_nonzero.items():
+        if col in _EXPECTED_NULL_COLS_BEFORE_2022 and cnt <= pre_2022_rows:
+            expected_nulls[col] = cnt
+        else:
+            unexpected_nulls[col] = cnt
+
+    total_nulls            = sum(null_counts_nonzero.values())
+    total_unexpected_nulls = sum(unexpected_nulls.values())
+
+    if total_unexpected_nulls > 0:
+        top_nulls = sorted(unexpected_nulls.items(), key=lambda x: -x[1])[:5]
+        top_str = ", ".join(
+            f"{col}={cnt} ({cnt/len(df)*100:.1f}%)" for col, cnt in top_nulls
+        )
         warnings_list.append(
-            f"{total_nulls} total nulls across {len(null_counts_nonzero)} column(s): {top_str}"
+            f"{total_unexpected_nulls} unexpected null(s) across "
+            f"{len(unexpected_nulls)} column(s): {top_str}"
         )
 
     # Duplicate dates
@@ -567,19 +831,21 @@ def audit_dataframe(
             )
 
     result = {
-        "city":           city,
-        "rows":           actual_days,
-        "expected_rows":  expected_days,
-        "coverage_pct":   round(coverage_pct, 2),
-        "actual_start":   str(actual_start.date()),
-        "actual_end":     str(actual_end.date()),
-        "gap_days":       gap_count,
-        "gap_sample":     gap_sample,
-        "total_nulls":    total_nulls,
-        "null_by_column": null_counts_nonzero,  # only columns with > 0 nulls
-        "duplicate_dates": dup_count,
-        "warnings":       warnings_list,
-        "status":         "⚠️  WARN" if warnings_list else "✅ PASS",
+        "city":              city,
+        "rows":              actual_days,
+        "expected_rows":     expected_days,
+        "coverage_pct":      round(coverage_pct, 2),
+        "actual_start":      str(actual_start.date()),
+        "actual_end":        str(actual_end.date()),
+        "gap_days":          gap_count,
+        "gap_sample":        gap_sample,
+        "total_nulls":       total_nulls,
+        "unexpected_nulls":  total_unexpected_nulls,
+        "expected_nulls":    expected_nulls,      # dict: {col: count} — pre-2022 visibility
+        "null_by_column":    null_counts_nonzero, # all columns with > 0 nulls
+        "duplicate_dates":   dup_count,
+        "warnings":          warnings_list,
+        "status":            "⚠️  WARN" if warnings_list else "✅ PASS",
     }
     return result
 
@@ -596,15 +862,16 @@ def audit_all(
     for city, df in dataframes.items():
         r = audit_dataframe(df, city, expected_start, expected_end)
         rows.append({
-            "city":          r["city"],
-            "status":        r["status"],
-            "rows":          r["rows"],
-            "expected_rows": r["expected_rows"],
-            "coverage_%":    r["coverage_pct"],
-            "gap_days":      r["gap_days"],
-            "total_nulls":   r["total_nulls"],
-            "dup_dates":     r["duplicate_dates"],
-            "warnings":      "; ".join(r["warnings"]) if r["warnings"] else "",
+            "city":             r["city"],
+            "status":           r["status"],
+            "rows":             r["rows"],
+            "expected_rows":    r["expected_rows"],
+            "coverage_%":       r["coverage_pct"],
+            "gap_days":         r["gap_days"],
+            "total_nulls":      r["total_nulls"],
+            "unexpected_nulls": r["unexpected_nulls"],
+            "dup_dates":        r["duplicate_dates"],
+            "warnings":         "; ".join(r["warnings"]) if r["warnings"] else "",
         })
     return pd.DataFrame(rows).set_index("city")
 

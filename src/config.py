@@ -34,14 +34,19 @@ for _p in PATHS.values():
 
 # ── API endpoints ─────────────────────────────────────────────────────────────
 API = {
-    "historical_url": "https://archive-api.open-meteo.com/v1/archive",
-    "forecast_url":   "https://api.open-meteo.com/v1/forecast",
-    "marine_url":     "https://marine-api.open-meteo.com/v1/marine",
+    "historical_url":          "https://archive-api.open-meteo.com/v1/archive",
+    "historical_forecast_url": "https://historical-forecast-api.open-meteo.com/v1/forecast",
+    "forecast_url":            "https://api.open-meteo.com/v1/forecast",
+    "marine_url":              "https://marine-api.open-meteo.com/v1/marine",
     "timeout":        30,        # seconds per request
     "max_retries":    3,         # retry attempts on transient failures
     "backoff_base":   2,         # exponential backoff: 2^attempt seconds
     "forecast_days":  7,
 }
+
+# Earliest date for which the historical-forecast-api has visibility data
+# Before this date, visibility comes from fog_proxy (humidity + dew-point spread)
+VISIBILITY_AVAILABLE_FROM = "2022-01-01"
 
 # ── Cities ────────────────────────────────────────────────────────────────────
 # Keys must be stable — they are used as filenames and DB keys.
@@ -87,15 +92,25 @@ DATE_RANGE = {
 }
 
 # ── Weather variables ─────────────────────────────────────────────────────────
-# All variables confirmed available in Open-Meteo ARCHIVE endpoint.
+# Daily variables fetched from the Open-Meteo ARCHIVE endpoint (archive-api).
+# These are available for all cities and all years (1940+).
 #
-# NOTE — visibility_mean is intentionally excluded:
-#   The archive returns null for visibility_mean at most Caspian coordinates
-#   (ERA5 reanalysis does not carry visibility as a gridded field).
-#   It IS available on the forecast endpoint (FORECAST_VARIABLES below).
-#   Fog risk is instead proxied in Day 4 feature engineering via:
-#     fog_proxy = (relative_humidity_2m_mean >= 90) AND
-#                 (temperature_2m_mean - dew_point_2m_mean) <= 2
+# VISIBILITY STRATEGY
+# -------------------
+# The archive endpoint (ERA5) does NOT include visibility as a gridded field.
+# The HISTORICAL FORECAST endpoint (historical-forecast-api) DOES include it
+# as an HOURLY variable, from 2022-01-01 onwards. We handle this in two tiers:
+#
+#   For dates >= 2022-01-01:
+#     → fetch_historical_forecast_hourly() pulls hourly visibility
+#     → aggregate_hourly_visibility() computes per-day:
+#         visibility_mean, visibility_min, visibility_hours_below_1km
+#     → merged into the main DataFrame on (city, date)
+#
+#   For dates < 2022-01-01:
+#     → fog_proxy (derived feature, added in Day 4 feature engineering):
+#         fog_proxy = (relative_humidity_2m_mean >= 90) AND
+#                     (temperature_2m_mean - dew_point_2m_mean) <= 2
 VARIABLES: dict[str, list[str]] = {
 
     "temperature": [
@@ -123,9 +138,21 @@ VARIABLES: dict[str, list[str]] = {
         "dew_point_2m_mean",
         "surface_pressure_mean",
         "shortwave_radiation_sum",
-        # visibility_mean excluded — archive returns nulls; use fog_proxy in Day 4
     ],
 }
+
+# Hourly variables fetched from historical-forecast-api, then aggregated to
+# daily values and merged into the main DataFrame.
+HOURLY_VARIABLES_FOR_AGGREGATION: list[str] = [
+    "visibility",   # metres — aggregated to visibility_mean, _min, _hours_below_1km
+]
+
+# Columns produced by aggregate_hourly_visibility() — added to main DataFrame
+VISIBILITY_DAILY_COLUMNS: list[str] = [
+    "visibility_mean",              # mean daily visibility (m)
+    "visibility_min",               # worst hour of the day (m)
+    "visibility_hours_below_1km",   # count of hours with vis < 1000m
+]
 
 # Flat list used for API calls
 ALL_VARIABLES: list[str] = [v for group in VARIABLES.values() for v in group]
@@ -155,16 +182,21 @@ MARINE_VARIABLES: list[str] = [
 
 # ── Risk thresholds ───────────────────────────────────────────────────────────
 # A day is flagged as a "delay-risk day" if ANY threshold is breached.
-# Visibility: BELOW threshold = risk. All others: ABOVE threshold = risk.
+# Most variables: ABOVE threshold = risk.
+# Variables in _BELOW_THRESHOLD_VARS (risk_labeler): BELOW threshold = risk.
+# Columns missing from a given DataFrame are silently skipped by label_risk_days.
 RISK_THRESHOLDS: dict[str, float] = {
-    "wind_speed_10m_max":  50.0,   # km/h  — Beaufort 10 / storm force
-    "wind_gusts_10m_max":  75.0,   # km/h
-    "precipitation_sum":   15.0,   # mm/day
-    "snowfall_sum":         5.0,   # cm/day
-    "wave_height":          2.5,   # metres  (ERA5 marine)
-    # visibility_mean removed — archive data is null; fog risk captured via:
-    #   fog_proxy_flag = (relative_humidity_2m_mean >= 90) & (temp - dew_point <= 2)
-    # This binary flag is added as a feature column in Day 4.
+    "wind_speed_10m_max":          50.0,    # km/h  — Beaufort 10 / storm force
+    "wind_gusts_10m_max":          75.0,    # km/h
+    "precipitation_sum":           15.0,    # mm/day
+    "snowfall_sum":                 5.0,    # cm/day
+    "wave_height":                  2.5,    # metres  (ERA5 marine)
+    "visibility_mean":          1000.0,     # metres — BELOW this = fog risk
+    "visibility_min":            500.0,     # metres — BELOW this = severe fog
+    "visibility_hours_below_1km":   4.0,    # count — ABOVE this = sustained fog
+    # visibility_* columns only present for dates >= 2022-01-01
+    # (see VISIBILITY_AVAILABLE_FROM). For earlier dates, fog_proxy_flag
+    # feature is used (added in Day 4 feature engineering).
 }
 
 # Months with >= this many risk days are labelled 1 (high-risk month)

@@ -20,23 +20,29 @@ from __future__ import annotations
 from typing import Optional
 import pandas as pd
 
-# ── Default thresholds (mirrors src/api_client.py — keep in sync) ────────────
+# ── Default thresholds (mirrors src/config.py — keep in sync) ────────────────
+# Missing columns in a given DataFrame are silently skipped.
+# This is intentional: visibility_* columns only exist for dates >= 2022-01-01
+# (see fetch_historical_forecast_hourly + merge_visibility_into_daily in
+# src/ingestion.py). For earlier dates, fog_proxy_flag (Day 4 feature) is used.
 _DEFAULT_THRESHOLDS: dict[str, float] = {
-    "wind_speed_10m_max": 50.0,   # km/h
-    "wind_gusts_10m_max": 75.0,   # km/h
-    "precipitation_sum":  15.0,   # mm/day
-    "snowfall_sum":        5.0,   # cm/day
-    "wave_height":         2.5,   # metres  (ERA5 marine)
-    # visibility_mean removed: Open-Meteo archive returns null at Caspian coords.
-    # Fog risk is captured via fog_proxy_flag feature added in Day 4:
-    #   (relative_humidity_2m_mean >= 90) AND (temp_2m_mean - dew_point_2m_mean <= 2)
+    "wind_speed_10m_max":         50.0,    # km/h  — Beaufort 10 / storm force
+    "wind_gusts_10m_max":         75.0,    # km/h
+    "precipitation_sum":          15.0,    # mm/day
+    "snowfall_sum":                5.0,    # cm/day
+    "wave_height":                 2.5,    # metres  (ERA5 marine)
+    "visibility_mean":          1000.0,    # metres — BELOW = fog risk
+    "visibility_min":            500.0,    # metres — BELOW = severe fog
+    "visibility_hours_below_1km":   4.0,   # count  — ABOVE = sustained fog
 }
 
 _DEFAULT_HIGH_RISK_DAYS: int = 5   # days/month → label = 1
 
-# Variables where LOWER value = higher risk (all others: higher = risk)
-# visibility_mean removed — see note above
-_BELOW_THRESHOLD_VARS: set[str] = set()
+# Variables where LOWER value = higher risk (all others: ABOVE = risk)
+_BELOW_THRESHOLD_VARS: set[str] = {
+    "visibility_mean",
+    "visibility_min",
+}
 
 
 def label_risk_days(

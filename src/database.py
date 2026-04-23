@@ -168,16 +168,11 @@ def load_raw_data(
 
     # ── Weather historical ────────────────────────────────────────────────────
     weather_files = sorted(data_dir.glob("*_historical_*.csv"))
-
-    # If city-specific historical files exist, skip all_cities_historical_*.csv
-    city_specific_weather = [f for f in weather_files if not f.name.startswith("all_cities_")]
-    if city_specific_weather:
-        weather_files = city_specific_weather
-
     if weather_files:
         for f in weather_files:
+            # Read CSV header to determine which columns are present
             df_sample = pd.read_csv(f, nrows=0)
-
+            # Select only columns that exist in the raw table
             raw_cols = [
                 "city", "date",
                 "temperature_2m_max", "temperature_2m_min",
@@ -193,20 +188,21 @@ def load_raw_data(
             select_expr = ", ".join(present)
 
             conn.execute(f"""
-                INSERT OR IGNORE INTO raw.weather_daily ({select_expr})
+                INSERT INTO raw.weather_daily ({select_expr})
                 SELECT {select_expr}
                 FROM read_csv_auto('{f}', header=true, dateformat='%Y-%m-%d')
             """)
             logger.info("  Loaded %s → raw.weather_daily", f.name)
 
+            # If file also has visibility columns, load those too
             vis_cols = ["visibility_mean", "visibility_min", "visibility_hours_below_1km"]
             vis_present = [c for c in vis_cols if c in df_sample.columns]
             if vis_present:
                 vis_select = ", ".join(["city", "date"] + vis_present)
+                # Only insert rows where visibility data exists (non-null)
                 where_clause = " OR ".join(f"{c} IS NOT NULL" for c in vis_present)
-
                 conn.execute(f"""
-                    INSERT OR IGNORE INTO raw.visibility_daily ({vis_select})
+                    INSERT INTO raw.visibility_daily ({vis_select})
                     SELECT {vis_select}
                     FROM read_csv_auto('{f}', header=true, dateformat='%Y-%m-%d')
                     WHERE {where_clause}
@@ -280,7 +276,11 @@ def build_staging(conn) -> None:
       - Enforce NOT NULL on critical columns
       - Left-join visibility data onto weather
       - Cast types explicitly
-      - Add computed fog_proxy_flag for pre-2022 dates
+
+    Note: visibility imputation + visibility_is_known flag are handled
+    by src/cleaning.py:clean_raw_to_staging() which REPLACES the output
+    of this function when called from the Day 4 pipeline. This function
+    is kept as a minimal reference / fallback.
     """
     conn.execute("""
         CREATE OR REPLACE TABLE staging.weather_daily AS
@@ -338,15 +338,6 @@ def build_staging(conn) -> None:
             ROUND(v.visibility_min, 1)               AS visibility_min,
             CAST(v.visibility_hours_below_1km AS INTEGER)
                                                      AS visibility_hours_below_1km,
-
-            -- Derived: fog proxy for dates without visibility data
-            CASE
-                WHEN v.visibility_mean IS NOT NULL THEN NULL
-                WHEN w.relative_humidity_2m_mean >= 90
-                     AND (w.temperature_2m_mean - w.dew_point_2m_mean) <= 2
-                THEN 1
-                ELSE 0
-            END AS fog_proxy_flag
 
         FROM clean_weather w
         LEFT JOIN clean_vis v
@@ -408,9 +399,6 @@ def build_analytics(conn) -> None:
             CASE WHEN visibility_mean IS NOT NULL AND visibility_mean < 1000
                  THEN 1 ELSE 0 END
                 AS risk_visibility,
-            CASE WHEN fog_proxy_flag = 1 THEN 1 ELSE 0 END
-                AS risk_fog_proxy,
-
             -- Combined: any risk flag triggered
             CASE WHEN
                 wind_speed_10m_max > 50
@@ -418,21 +406,20 @@ def build_analytics(conn) -> None:
                 OR precipitation_sum > 15
                 OR snowfall_sum > 5
                 OR (visibility_mean IS NOT NULL AND visibility_mean < 1000)
-                OR fog_proxy_flag = 1
             THEN 1 ELSE 0 END
                 AS is_risk_day,
 
             -- Rolling stats (7-day window)
-            AVG(wind_speed_10m_max) OVER w7      AS wind_speed_7d_avg,
-            MAX(wind_speed_10m_max) OVER w7      AS wind_speed_7d_max,
-            AVG(precipitation_sum) OVER w7       AS precip_7d_avg,
-            SUM(precipitation_sum) OVER w7       AS precip_7d_sum,
-            AVG(temperature_2m_mean) OVER w7     AS temp_7d_avg,
+            AVG(wind_speed_10m_max) OVER w7     AS wind_speed_7d_avg,
+            MAX(wind_speed_10m_max) OVER w7     AS wind_speed_7d_max,
+            AVG(precipitation_sum)  OVER w7     AS precip_7d_avg,
+            SUM(precipitation_sum)  OVER w7     AS precip_7d_sum,
+            AVG(temperature_2m_mean) OVER w7    AS temp_7d_avg,
 
             -- Lag features (previous day)
-            LAG(wind_speed_10m_max, 1) OVER w_city     AS wind_speed_lag1,
-            LAG(precipitation_sum, 1) OVER w_city      AS precip_lag1,
-            LAG(temperature_2m_mean, 1) OVER w_city    AS temp_lag1
+            LAG(wind_speed_10m_max, 1) OVER w_city    AS wind_speed_lag1,
+            LAG(precipitation_sum, 1)  OVER w_city    AS precip_lag1,
+            LAG(temperature_2m_mean, 1) OVER w_city   AS temp_lag1
 
         FROM staging.weather_daily
         WINDOW
@@ -450,49 +437,50 @@ def build_analytics(conn) -> None:
         CREATE OR REPLACE TABLE analytics.monthly_summary AS
         SELECT
             city,
-            EXTRACT(YEAR FROM date)   AS year,
-            EXTRACT(MONTH FROM date)  AS month,
+            EXTRACT(YEAR FROM date)  AS year,
+            EXTRACT(MONTH FROM date) AS month,
             DATE_TRUNC('month', date) AS month_start,
 
             -- Row counts
-            COUNT(*) AS total_days,
-            SUM(is_risk_day) AS risk_days,
-            ROUND(SUM(is_risk_day) * 100.0 / COUNT(*), 1) AS risk_day_pct,
+            COUNT(*)                        AS total_days,
+            SUM(is_risk_day)                AS risk_days,
+            ROUND(SUM(is_risk_day) * 100.0 / COUNT(*), 1)
+                                            AS risk_day_pct,
 
             -- TARGET LABEL
-            CASE WHEN SUM(is_risk_day) >= 5 THEN 1 ELSE 0 END AS high_risk_month,
+            CASE WHEN SUM(is_risk_day) >= 5 THEN 1 ELSE 0 END
+                                            AS high_risk_month,
 
             -- Risk breakdown
-            SUM(risk_wind)       AS wind_risk_days,
-            SUM(risk_gust)       AS gust_risk_days,
-            SUM(risk_precip)     AS precip_risk_days,
-            SUM(risk_snow)       AS snow_risk_days,
-            SUM(risk_visibility) AS visibility_risk_days,
-            SUM(risk_fog_proxy)  AS fog_proxy_risk_days,
+            SUM(risk_wind)                  AS wind_risk_days,
+            SUM(risk_gust)                  AS gust_risk_days,
+            SUM(risk_precip)                AS precip_risk_days,
+            SUM(risk_snow)                  AS snow_risk_days,
+            SUM(risk_visibility)            AS visibility_risk_days,
 
             -- Temperature stats
-            ROUND(AVG(temperature_2m_mean), 2)    AS temp_mean,
-            ROUND(MAX(temperature_2m_max), 2)     AS temp_max,
-            ROUND(MIN(temperature_2m_min), 2)     AS temp_min,
+            ROUND(AVG(temperature_2m_mean), 2)  AS temp_mean,
+            ROUND(MAX(temperature_2m_max), 2)   AS temp_max,
+            ROUND(MIN(temperature_2m_min), 2)   AS temp_min,
             ROUND(STDDEV(temperature_2m_mean), 2) AS temp_std,
 
             -- Wind stats
-            ROUND(AVG(wind_speed_10m_max), 2)     AS wind_mean,
-            ROUND(MAX(wind_speed_10m_max), 2)     AS wind_max,
-            ROUND(STDDEV(wind_speed_10m_max), 2)  AS wind_std,
-            ROUND(AVG(wind_gusts_10m_max), 2)     AS gust_mean,
-            ROUND(MAX(wind_gusts_10m_max), 2)     AS gust_max,
+            ROUND(AVG(wind_speed_10m_max), 2)   AS wind_mean,
+            ROUND(MAX(wind_speed_10m_max), 2)   AS wind_max,
+            ROUND(STDDEV(wind_speed_10m_max), 2) AS wind_std,
+            ROUND(AVG(wind_gusts_10m_max), 2)   AS gust_mean,
+            ROUND(MAX(wind_gusts_10m_max), 2)   AS gust_max,
 
             -- Precipitation stats
-            ROUND(SUM(precipitation_sum), 2)      AS precip_total,
-            ROUND(AVG(precipitation_sum), 2)      AS precip_daily_avg,
-            ROUND(MAX(precipitation_sum), 2)      AS precip_max,
+            ROUND(SUM(precipitation_sum), 2)    AS precip_total,
+            ROUND(AVG(precipitation_sum), 2)    AS precip_daily_avg,
+            ROUND(MAX(precipitation_sum), 2)    AS precip_max,
             SUM(CASE WHEN precipitation_sum = 0 THEN 1 ELSE 0 END)
-                AS dry_days,
+                                                AS dry_days,
 
             -- Snowfall stats
-            ROUND(SUM(snowfall_sum), 2)           AS snow_total,
-            ROUND(MAX(snowfall_sum), 2)           AS snow_max,
+            ROUND(SUM(snowfall_sum), 2)         AS snow_total,
+            ROUND(MAX(snowfall_sum), 2)         AS snow_max,
 
             -- Pressure stats
             ROUND(AVG(surface_pressure_mean), 2)    AS pressure_mean,
@@ -504,22 +492,24 @@ def build_analytics(conn) -> None:
             ROUND(MAX(relative_humidity_2m_mean), 2) AS humidity_max,
 
             -- Visibility stats (NULL if no visibility data in this month)
-            ROUND(AVG(visibility_mean), 1) AS vis_mean_avg,
-            ROUND(MIN(visibility_min), 1)  AS vis_min_worst,
+            ROUND(AVG(visibility_mean), 1)          AS vis_mean_avg,
+            ROUND(MIN(visibility_min), 1)           AS vis_min_worst,
             SUM(CASE WHEN visibility_hours_below_1km >= 4 THEN 1 ELSE 0 END)
-                AS sustained_fog_days
+                                                    AS sustained_fog_days
 
         FROM analytics.daily_enriched
-        GROUP BY
-            city,
-            EXTRACT(YEAR FROM date),
-            EXTRACT(MONTH FROM date),
-            DATE_TRUNC('month', date)
-        ORDER BY city, year, month
+        GROUP BY city,
+                 EXTRACT(YEAR FROM date),
+                 EXTRACT(MONTH FROM date),
+                 DATE_TRUNC('month', date)
+        ORDER BY city,
+                 EXTRACT(YEAR FROM date),
+                 EXTRACT(MONTH FROM date)
     """)
 
     count = conn.execute("SELECT COUNT(*) FROM analytics.monthly_summary").fetchone()[0]
     logger.info("  Built analytics.monthly_summary: %d rows", count)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 7. Validation
@@ -546,52 +536,24 @@ def validate_database(
             val = conn.execute(sql).fetchone()[0]
             passed = expect_fn(val)
             results.append({
-                "check": name,
+                "check":  name,
                 "status": "✅ PASS" if passed else "⚠️ FAIL",
                 "detail": str(val) if passed else fail_msg_fn(val),
             })
         except Exception as exc:
             results.append({
-                "check": name,
-                "status": "❌ ERROR",
-                "detail": str(exc),
+                "check": name, "status": "❌ ERROR", "detail": str(exc)
             })
 
-    def _table_count(table_name: str) -> int:
-        try:
-            return conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-        except Exception:
-            return 0
-
-    raw_count = _table_count("raw.weather_daily")
-    staging_count = _table_count("staging.weather_daily")
-    daily_count = _table_count("analytics.daily_enriched")
-    monthly_count = _table_count("analytics.monthly_summary")
-
-    # Check 1: tables exist and are non-empty
-    for tbl, cnt in [
-        ("raw.weather_daily", raw_count),
-        ("staging.weather_daily", staging_count),
-        ("analytics.daily_enriched", daily_count),
-        ("analytics.monthly_summary", monthly_count),
-    ]:
-        results.append({
-            "check": f"Table exists: {tbl}",
-            "status": "✅ PASS" if cnt > 0 else "⚠️ FAIL",
-            "detail": str(cnt) if cnt > 0 else f"Table is empty ({cnt} rows)",
-        })
-
-    # If raw is empty, downstream checks are not meaningful
-    if raw_count == 0:
-        results.append({
-            "check": "Load status",
-            "status": "⚠️ FAIL",
-            "detail": (
-                "raw.weather_daily is empty. Most likely load_raw_data() found no matching "
-                "CSV files in data/raw or the ingestion/save step was not run."
-            ),
-        })
-        return pd.DataFrame(results)
+    # Check 1: tables exist
+    for tbl in ["raw.weather_daily", "staging.weather_daily",
+                "analytics.daily_enriched", "analytics.monthly_summary"]:
+        _check(
+            f"Table exists: {tbl}",
+            f"SELECT COUNT(*) FROM {tbl}",
+            lambda v: v > 0,
+            lambda v: f"Table is empty ({v} rows)",
+        )
 
     # Check 2: city count
     _check(
@@ -602,39 +564,31 @@ def validate_database(
     )
 
     # Check 3: row counts per city
-    try:
-        per_city = conn.execute("""
-            SELECT city, COUNT(*) AS n
-            FROM staging.weather_daily
-            GROUP BY city ORDER BY city
-        """).fetchdf()
-
-        for _, row in per_city.iterrows():
-            city, n = row["city"], row["n"]
-            expected_min = 1800
-            results.append({
-                "check": f"Row count: {city}",
-                "status": "✅ PASS" if n >= expected_min else "⚠️ FAIL",
-                "detail": f"{n} rows",
-            })
-    except Exception as exc:
+    per_city = conn.execute("""
+        SELECT city, COUNT(*) AS n
+        FROM staging.weather_daily
+        GROUP BY city ORDER BY city
+    """).fetchdf()
+    for _, row in per_city.iterrows():
+        city, n = row["city"], row["n"]
+        expected_min = 1800  # ~5 years minimum
         results.append({
-            "check": "Row counts per city",
-            "status": "❌ ERROR",
-            "detail": str(exc),
+            "check":  f"Row count: {city}",
+            "status": "✅ PASS" if n >= expected_min else "⚠️ FAIL",
+            "detail": f"{n} rows",
         })
 
     # Check 4: date range
     _check(
         "Date range start",
         "SELECT MIN(date) FROM staging.weather_daily",
-        lambda v: v is not None and str(v) <= expected_start,
+        lambda v: str(v) <= expected_start,
         lambda v: f"Starts at {v}, expected <= {expected_start}",
     )
     _check(
         "Date range end",
         "SELECT MAX(date) FROM staging.weather_daily",
-        lambda v: v is not None and str(v) >= expected_end,
+        lambda v: str(v) >= expected_end,
         lambda v: f"Ends at {v}, expected >= {expected_end}",
     )
 
@@ -644,8 +598,7 @@ def validate_database(
         """SELECT COUNT(*) FROM (
             SELECT city, date, COUNT(*) AS n
             FROM staging.weather_daily
-            GROUP BY city, date
-            HAVING COUNT(*) > 1
+            GROUP BY city, date HAVING n > 1
         )""",
         lambda v: v == 0,
         lambda v: f"{v} duplicate city-date pairs found",
@@ -671,17 +624,18 @@ def validate_database(
     # Check 7: analytics monthly summary has target label
     _check(
         "Target label exists",
-        "SELECT COUNT(DISTINCT high_risk_month) FROM analytics.monthly_summary",
-        lambda v: v is not None and v >= 1,
-        lambda v: f"Only {v} distinct label value(s) found",
+        """SELECT COUNT(DISTINCT high_risk_month)
+           FROM analytics.monthly_summary""",
+        lambda v: v == 2,   # should have both 0 and 1
+        lambda v: f"Only {v} distinct label value(s) — class imbalance issue",
     )
 
     # Check 8: risk day counts are reasonable
     _check(
         "Risk days present",
-        "SELECT COALESCE(SUM(is_risk_day), 0) FROM analytics.daily_enriched",
+        "SELECT SUM(is_risk_day) FROM analytics.daily_enriched",
         lambda v: v > 0,
-        lambda v: "No risk days flagged — thresholds may be too strict or tables are empty",
+        lambda v: "No risk days flagged — thresholds may be too strict",
     )
 
     return pd.DataFrame(results)

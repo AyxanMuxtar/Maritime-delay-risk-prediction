@@ -100,12 +100,10 @@ def _http_get(
     """
     HTTP GET with exponential backoff retry.
 
-    Uses only urllib (stdlib) — no requests library required.
-    Returns the parsed JSON body as a dict.
-
     Retries on:
-      - HTTP 429 (rate limit)
-      - HTTP 5xx (server errors)
+      - HTTP 429 (rate limit) — waits for Retry-After header if present,
+        otherwise uses a rate-limit-friendly schedule (30s, 60s, 120s)
+      - HTTP 5xx (server errors) — normal exponential backoff
       - URLError (network transient failures)
 
     Raises immediately on:
@@ -114,14 +112,24 @@ def _http_get(
     query = urlencode({k: v for k, v in params.items() if v is not None})
     full_url = f"{url}?{query}"
     last_exc: Exception = RuntimeError("No attempts made.")
+    rate_limit_wait: float | None = None   # set when server returns 429
 
     for attempt in range(max_retries + 1):
         if attempt > 0:
-            wait = backoff ** attempt
-            logger.warning(
-                "Retry %d/%d after %.0fs  (%s)",
-                attempt, max_retries, wait, type(last_exc).__name__,
-            )
+            if rate_limit_wait is not None:
+                # Rate-limit schedule: 30s, 60s, 120s, 240s...
+                wait = max(rate_limit_wait, 30 * (2 ** (attempt - 1)))
+                logger.warning(
+                    "Retry %d/%d after %.0fs (rate-limited — Open-Meteo free tier)",
+                    attempt, max_retries, wait,
+                )
+                rate_limit_wait = None   # reset; next iteration uses new header if any
+            else:
+                wait = backoff ** attempt
+                logger.warning(
+                    "Retry %d/%d after %.0fs  (%s)",
+                    attempt, max_retries, wait, type(last_exc).__name__,
+                )
             time.sleep(wait)
 
         try:
@@ -131,9 +139,19 @@ def _http_get(
 
         except HTTPError as exc:
             last_exc = exc
-            if exc.code in (429,) or exc.code >= 500:
-                continue          # retry
-            # 4xx (except 429) → bad request; no point retrying
+            if exc.code == 429:
+                # Honour Retry-After header if present (seconds or HTTP-date)
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                if retry_after:
+                    try:
+                        rate_limit_wait = float(retry_after)
+                    except ValueError:
+                        rate_limit_wait = 60.0   # fallback on HTTP-date format
+                else:
+                    rate_limit_wait = 30.0       # no header → use sane default
+                continue
+            if exc.code >= 500:
+                continue          # retry on server errors
             raise RuntimeError(
                 f"HTTP {exc.code} from Open-Meteo: {exc.reason}\n"
                 f"URL: {full_url}"
@@ -150,7 +168,11 @@ def _http_get(
 
     raise RuntimeError(
         f"All {max_retries + 1} attempts failed for {url}.\n"
-        f"Last error: {last_exc}"
+        f"Last error: {last_exc}\n"
+        f"TIP: Open-Meteo's free tier limits ~600 requests/minute, "
+        f"~10,000/day. If you hit this repeatedly, increase "
+        f"delay_between_cities in fetch_all_cities() or split the fetch "
+        f"across multiple days."
     )
 
 
@@ -347,6 +369,72 @@ def fetch_marine(
     return df
 
 
+def fetch_historical_chunked(
+    city:      str,
+    lat:       float,
+    lon:       float,
+    start:     str,
+    end:       str,
+    variables: list[str],
+    timezone:  str = "auto",
+    chunk_years: int = 2,
+    delay_between_chunks: float = 2.0,
+    timeout:   int = _DEFAULT_TIMEOUT,
+    max_retries: int = _DEFAULT_MAX_RETRY,
+) -> pd.DataFrame:
+    """
+    Fetch a long historical range by splitting into yearly chunks.
+
+    Use this when a single fetch triggers HTTP 429 (rate limiting).
+    Smaller requests each return faster and make the rate limiter less angry.
+
+    Parameters
+    ----------
+    chunk_years          : Split the range into chunks of this many years.
+                           Default 2 works well for 6-year windows. Use 1
+                           if still getting rate-limited.
+    delay_between_chunks : Seconds between chunk fetches. Default 2s.
+
+    Returns
+    -------
+    Single concatenated DataFrame (same shape as fetch_historical).
+    """
+    _validate_date_range(start, end)
+
+    start_date = date.fromisoformat(start)
+    end_date   = date.fromisoformat(end)
+
+    chunks: list[tuple[str, str]] = []
+    cur = start_date
+    while cur <= end_date:
+        # End of this chunk: Dec 31 of (cur.year + chunk_years - 1)
+        chunk_end_year = cur.year + chunk_years - 1
+        chunk_end = date(chunk_end_year, 12, 31)
+        if chunk_end > end_date:
+            chunk_end = end_date
+        chunks.append((cur.isoformat(), chunk_end.isoformat()))
+        cur = date(chunk_end_year + 1, 1, 1)
+
+    logger.info(
+        "Chunked fetch for %s: %d chunks (%d-year chunks)",
+        city, len(chunks), chunk_years,
+    )
+
+    pieces: list[pd.DataFrame] = []
+    for i, (cs, ce) in enumerate(chunks):
+        logger.info("  Chunk %d/%d: %s → %s", i + 1, len(chunks), cs, ce)
+        df = fetch_historical(
+            city=city, lat=lat, lon=lon,
+            start=cs, end=ce, variables=variables,
+            timezone=timezone, timeout=timeout, max_retries=max_retries,
+        )
+        pieces.append(df)
+        if i < len(chunks) - 1 and delay_between_chunks > 0:
+            time.sleep(delay_between_chunks)
+
+    return pd.concat(pieces, ignore_index=True).drop_duplicates(["city", "date"])
+
+
 def fetch_all_cities(
     cities:    dict,            # from src.config.CITIES
     start:     str,
@@ -355,15 +443,20 @@ def fetch_all_cities(
     timezone_key: str = "timezone",
     timeout:   int = _DEFAULT_TIMEOUT,
     max_retries: int = _DEFAULT_MAX_RETRY,
+    delay_between_cities: float = 2.0,
 ) -> dict[str, pd.DataFrame]:
     """
     Fetch historical weather for every city in the config dict.
 
     Parameters
     ----------
-    cities    : Dict of {name: {lat, lon, timezone, ...}} (from config.CITIES)
-    start/end : ISO date strings
-    variables : Variable names
+    cities               : Dict of {name: {lat, lon, timezone, ...}}
+    start/end            : ISO date strings
+    variables            : Variable names
+    delay_between_cities : Seconds to wait between city fetches. Default 2s
+                           keeps us well under Open-Meteo free-tier limits
+                           (~600 req/min). Increase to 5–10s if you see
+                           HTTP 429 responses.
 
     Returns
     -------
@@ -376,8 +469,9 @@ def fetch_all_cities(
     """
     results: dict[str, pd.DataFrame] = {}
     failed:  list[str] = []
+    city_list = list(cities.items())
 
-    for name, meta in cities.items():
+    for i, (name, meta) in enumerate(city_list):
         tz = meta.get(timezone_key, "auto")
         try:
             df = fetch_historical(
@@ -395,6 +489,10 @@ def fetch_all_cities(
         except Exception as exc:                         # noqa: BLE001
             logger.error("FAILED %s: %s", name, exc)
             failed.append(name)
+
+        # Pause between cities to stay under rate limits
+        if i < len(city_list) - 1 and delay_between_cities > 0:
+            time.sleep(delay_between_cities)
 
     if failed:
         logger.warning("Cities with errors: %s", failed)

@@ -44,18 +44,13 @@ API = {
     "forecast_days":  7,
 }
 
-# Earliest date for which the historical-forecast-api has visibility data
-# Before this date, visibility comes from fog_proxy (humidity + dew-point spread)
-VISIBILITY_AVAILABLE_FROM = "2022-01-01"
-
 # ── Cities ────────────────────────────────────────────────────────────────────
-# Keys must be stable — they are used as filenames and DB keys.
 CITIES: dict[str, dict] = {
     "Baku": {
         "lat": 40.41, "lon": 49.87,
         "country": "Azerbaijan",
         "timezone": "Asia/Baku",
-        "offshore": {"lat": 40.30, "lon": 50.10},   # ERA5 marine proxy
+        "offshore": {"lat": 40.30, "lon": 50.10},
     },
     "Aktau": {
         "lat": 43.65, "lon": 51.17,
@@ -84,33 +79,30 @@ CITIES: dict[str, dict] = {
 }
 
 # ── Historical date range ─────────────────────────────────────────────────────
-# 10 years gives enough seasonal cycles for robust ML training.
-# End date is fixed so results are reproducible regardless of run date.
+# 10 years of real ERA5 weather data.
+# Coverage notes:
+#   - All 15 weather variables are real ERA5 reanalysis for the FULL range
+#   - Visibility is only available from 2022-01-01 (historical-forecast-api)
+#   - Pre-2022 rows carry visibility_* as NaN — handled via missingness flag
+#     + median imputation at feature-engineering time (see features.py)
+#   - NO synthetic fog_proxy — the model sees a uniform feature schema and
+#     learns to weight visibility less when visibility_is_known=0
+#
+# Sample counts:
+#   - ~3,653 days × 5 cities = ~18,265 city-days
+#   - ~120 months × 5 cities = ~600 monthly labels for classification
 DATE_RANGE = {
     "start": "2015-01-01",
     "end":   "2024-12-31",
 }
 
+# Earliest date for which the historical-forecast-api has visibility data.
+# Rows before this date have visibility_* = NaN in staging and are flagged
+# with visibility_is_known = 0 during feature engineering.
+VISIBILITY_AVAILABLE_FROM = "2022-01-01"
+
 # ── Weather variables ─────────────────────────────────────────────────────────
 # Daily variables fetched from the Open-Meteo ARCHIVE endpoint (archive-api).
-# These are available for all cities and all years (1940+).
-#
-# VISIBILITY STRATEGY
-# -------------------
-# The archive endpoint (ERA5) does NOT include visibility as a gridded field.
-# The HISTORICAL FORECAST endpoint (historical-forecast-api) DOES include it
-# as an HOURLY variable, from 2022-01-01 onwards. We handle this in two tiers:
-#
-#   For dates >= 2022-01-01:
-#     → fetch_historical_forecast_hourly() pulls hourly visibility
-#     → aggregate_hourly_visibility() computes per-day:
-#         visibility_mean, visibility_min, visibility_hours_below_1km
-#     → merged into the main DataFrame on (city, date)
-#
-#   For dates < 2022-01-01:
-#     → fog_proxy (derived feature, added in Day 4 feature engineering):
-#         fog_proxy = (relative_humidity_2m_mean >= 90) AND
-#                     (temperature_2m_mean - dew_point_2m_mean) <= 2
 VARIABLES: dict[str, list[str]] = {
 
     "temperature": [
@@ -141,10 +133,10 @@ VARIABLES: dict[str, list[str]] = {
     ],
 }
 
-# Hourly variables fetched from historical-forecast-api, then aggregated to
-# daily values and merged into the main DataFrame.
+# Hourly variables fetched from historical-forecast-api (2022+ coverage),
+# then aggregated to daily values and merged into the main DataFrame.
 HOURLY_VARIABLES_FOR_AGGREGATION: list[str] = [
-    "visibility",   # metres — aggregated to visibility_mean, _min, _hours_below_1km
+    "visibility",   # metres
 ]
 
 # Columns produced by aggregate_hourly_visibility() — added to main DataFrame
@@ -154,10 +146,24 @@ VISIBILITY_DAILY_COLUMNS: list[str] = [
     "visibility_hours_below_1km",   # count of hours with vis < 1000m
 ]
 
+# ── Marine / wave variables ───────────────────────────────────────────────────
+# Open-Meteo Marine API is forecast-only (7 days). For historical data, the SMB
+# proxy in src.era5_client.estimate_wave_height_from_wind() derives wave_height
+# from wind. Names below match the Marine API daily endpoint's required suffixes
+# ('_max' / '_dominant') and are used by fetch_marine_forecast() for live data.
+MARINE_VARIABLES: list[str] = [
+    "wave_height_max",
+    "wave_direction_dominant",
+    "wave_period_max",
+    "wind_wave_height_max",
+    "swell_wave_height_max",
+    "swell_wave_period_max",
+]
+
 # Flat list used for API calls
 ALL_VARIABLES: list[str] = [v for group in VARIABLES.values() for v in group]
 
-# Subset available on the forecast endpoint (fewer vars than archive)
+# Subset available on the forecast endpoint
 FORECAST_VARIABLES: list[str] = [
     "temperature_2m_max",
     "temperature_2m_min",
@@ -170,16 +176,6 @@ FORECAST_VARIABLES: list[str] = [
     "visibility_mean",
 ]
 
-# ── Marine (ERA5) variables ───────────────────────────────────────────────────
-MARINE_VARIABLES: list[str] = [
-    "wave_height",
-    "wave_direction",
-    "wave_period",
-    "wind_wave_height",
-    "swell_wave_height",
-    "swell_wave_period",
-]
-
 # ── Risk thresholds ───────────────────────────────────────────────────────────
 # A day is flagged as a "delay-risk day" if ANY threshold is breached.
 # Most variables: ABOVE threshold = risk.
@@ -190,20 +186,51 @@ RISK_THRESHOLDS: dict[str, float] = {
     "wind_gusts_10m_max":          75.0,    # km/h
     "precipitation_sum":           15.0,    # mm/day
     "snowfall_sum":                 5.0,    # cm/day
-    "wave_height":                  2.5,    # metres  (ERA5 marine)
+    "wave_height":                  2.5,    # metres  (SMB proxy from wind)
     "visibility_mean":          1000.0,     # metres — BELOW this = fog risk
     "visibility_min":            500.0,     # metres — BELOW this = severe fog
-    "visibility_hours_below_1km":   4.0,    # count — ABOVE this = sustained fog
-    # visibility_* columns only present for dates >= 2022-01-01
-    # (see VISIBILITY_AVAILABLE_FROM). For earlier dates, fog_proxy_flag
-    # feature is used (added in Day 4 feature engineering).
+    "visibility_hours_below_1km":   4.0,    # count  — ABOVE this = sustained fog
 }
 
 # Months with >= this many risk days are labelled 1 (high-risk month)
 HIGH_RISK_MONTH_THRESHOLD: int = 5
 
+# ── Outlier handling (Day 4) ─────────────────────────────────────────────────
+# Columns where outliers are flagged (NOT removed) using IQR method.
+# Removal is a modelling-time decision, not a cleaning-time one.
+OUTLIER_FLAG_COLUMNS: list[str] = [
+    "temperature_2m_max",
+    "temperature_2m_min",
+    "wind_speed_10m_max",
+    "wind_gusts_10m_max",
+    "precipitation_sum",
+    "surface_pressure_mean",
+]
+
+# Per-city 99th-percentile caps for heavy-tailed variables.
+# Winsorizing here prevents one extreme Anzali rainstorm from dominating
+# cross-city feature distributions. Applied during staging → analytics.
+# None = don't cap. Values computed empirically from Day 2 data audit.
+WINSORIZE_CAPS: dict[str, dict[str, float]] = {
+    "precipitation_sum": {
+        # Anzali's 99th percentile is ~4x other cities — cap it to reduce skew
+        "Anzali":       60.0,
+        "Baku":         30.0,
+        "Aktau":        25.0,
+        "Turkmenbashi": 25.0,
+        "Makhachkala":  40.0,
+    },
+    "snowfall_sum": {
+        # All cities — cap at physically reasonable daily snowfall
+        "Anzali":       10.0,
+        "Baku":         15.0,
+        "Aktau":        20.0,
+        "Turkmenbashi": 10.0,
+        "Makhachkala":  30.0,
+    },
+}
+
 # ── Data schema ───────────────────────────────────────────────────────────────
-# Expected dtypes after ingestion — used in the QA audit.
 EXPECTED_DTYPES: dict[str, str] = {
     "date":                          "datetime64[ns]",
     "city":                          "object",

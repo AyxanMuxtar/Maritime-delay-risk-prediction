@@ -5,13 +5,14 @@ Delay-risk day flagging and monthly label generation.
 
 No imports from other src modules — all thresholds are either passed
 as arguments (default: None → uses module-level defaults below) or
-imported explicitly by the caller from src.api_client.
+imported explicitly by the caller from src.config (the single source
+of truth for all project-wide constants).
 
 Usage
 -----
     from src.risk_labeler import label_risk_days, monthly_features
     # optionally override thresholds:
-    from src.api_client import RISK_THRESHOLDS
+    from src.config import RISK_THRESHOLDS
     daily_risk = label_risk_days(df, thresholds=RISK_THRESHOLDS)
 """
 

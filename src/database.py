@@ -518,17 +518,35 @@ def build_analytics(conn) -> None:
 def validate_database(
     conn,
     expected_cities: list[str] | None = None,
-    expected_start: str = "2019-01-01",
-    expected_end: str = "2024-12-31",
+    expected_start:  str | None       = None,
+    expected_end:    str | None       = None,
 ) -> pd.DataFrame:
     """
     Run a battery of validation checks on the database.
 
+    Parameters
+    ----------
+    expected_cities : List of city names (defaults to src.config.CITIES keys)
+    expected_start  : ISO date string (defaults to src.config.DATE_RANGE['start'])
+    expected_end    : ISO date string (defaults to src.config.DATE_RANGE['end'])
+
+    Defaults are read from src.config so a config change propagates
+    automatically — no stale hardcoded dates can cause validation to
+    pass when it shouldn't.
+
     Returns a DataFrame with columns: check, status, detail
     """
-    expected_cities = expected_cities or [
-        "Baku", "Aktau", "Anzali", "Turkmenbashi", "Makhachkala"
-    ]
+    # Resolve defaults from src.config so validation always matches the
+    # project-wide source of truth. Explicit arguments still win.
+    if expected_cities is None or expected_start is None or expected_end is None:
+        from src.config import CITIES as _CFG_CITIES, DATE_RANGE as _CFG_DATE_RANGE
+        if expected_cities is None:
+            expected_cities = list(_CFG_CITIES.keys())
+        if expected_start is None:
+            expected_start = _CFG_DATE_RANGE["start"]
+        if expected_end is None:
+            expected_end = _CFG_DATE_RANGE["end"]
+
     results: list[dict] = []
 
     def _check(name: str, sql: str, expect_fn, fail_msg_fn):
@@ -657,11 +675,14 @@ def run_query(conn, sql: str) -> pd.DataFrame:
 def build_database(
     db_path: str | Path = "data/caspian_weather.duckdb",
     data_dir: str | Path = "data/raw",
-    expected_start: str = "2019-01-01",
-    expected_end: str = "2024-12-31",
+    expected_start: str | None = None,
+    expected_end:   str | None = None,
 ) -> tuple:
     """
     End-to-end: create DB, load raw data, build staging & analytics, validate.
+
+    When expected_start / expected_end are None, validate_database() reads
+    them from src.config.DATE_RANGE.
 
     Returns (connection, load_counts, validation_df).
     """
@@ -671,6 +692,9 @@ def build_database(
     counts = load_raw_data(conn, data_dir)
     build_staging(conn)
     build_analytics(conn)
-    validation = validate_database(conn, expected_start=expected_start,
-                                   expected_end=expected_end)
+    validation = validate_database(
+        conn,
+        expected_start=expected_start,
+        expected_end=expected_end,
+    )
     return conn, counts, validation

@@ -117,6 +117,31 @@ _RAW_FORECAST_COLUMNS = """
 """
 
 
+def create_raw_tables_if_absent(conn) -> None:
+    """
+    Like create_raw_tables() but uses CREATE TABLE IF NOT EXISTS so it
+    does NOT wipe existing data. Use this for incremental pipeline runs.
+    """
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS raw.weather_daily (
+            {_RAW_WEATHER_COLUMNS},
+            PRIMARY KEY (city, date)
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS raw.visibility_daily (
+            {_RAW_VISIBILITY_COLUMNS},
+            PRIMARY KEY (city, date)
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS raw.forecast_7day (
+            {_RAW_FORECAST_COLUMNS}
+        )
+    """)
+    logger.info("Raw tables ready (preserving any existing rows)")
+
+
 def create_raw_tables(conn) -> None:
     """
     Create raw-layer tables. Drops and recreates to ensure clean state.
@@ -196,7 +221,7 @@ def load_raw_data(
             select_expr = ", ".join(present)
 
             conn.execute(f"""
-                INSERT OR IGNORE INTO raw.weather_daily ({select_expr})
+                INSERT OR REPLACE INTO raw.weather_daily ({select_expr})
                 SELECT {select_expr}
                 FROM read_csv_auto('{f}', header=true, dateformat='%Y-%m-%d')
             """)
@@ -210,7 +235,7 @@ def load_raw_data(
                 # Only insert rows where visibility data exists (non-null)
                 where_clause = " OR ".join(f"{c} IS NOT NULL" for c in vis_present)
                 conn.execute(f"""
-                    INSERT OR IGNORE INTO raw.visibility_daily ({vis_select})
+                    INSERT OR REPLACE INTO raw.visibility_daily ({vis_select})
                     SELECT {vis_select}
                     FROM read_csv_auto('{f}', header=true, dateformat='%Y-%m-%d')
                     WHERE {where_clause}

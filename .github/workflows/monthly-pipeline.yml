@@ -1,0 +1,134 @@
+name: Monthly pipeline
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT THIS DOES
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs src/pipeline.py on the 1st of every month at 06:00 UTC.
+# Also runnable manually from the "Actions" tab (workflow_dispatch).
+#
+# Flow:
+#   1. Check out the repo
+#   2. Set up Python + install requirements
+#   3. Pull existing DuckDB + models from the previous run (GitHub artifact)
+#   4. Run pipeline in incremental mode (fetches only new days since last run)
+#   5. Upload updated DuckDB + predictions + logs as a new artifact
+#   6. Commit the monthly prediction CSV back to the repo
+#
+# No PC needed. Runs on GitHub's servers. Free for public repos; private repos
+# use Actions minutes (2000/mo on free tier — this uses ~3 min/month).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # Run on the 1st of every month at 06:00 UTC
+    # Cron syntax: minute hour day-of-month month day-of-week
+    - cron: '0 6 1 * *'
+
+  # Allow manual runs from the Actions tab
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Pipeline mode'
+        type: choice
+        options:
+          - incremental
+          - full
+        default: incremental
+      since:
+        description: 'Override incremental start date (YYYY-MM-DD, optional)'
+        type: string
+        required: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+permissions:
+  contents: write   # needed so the workflow can commit the prediction CSV
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Download the previous run's database + models (if they exist).
+      # This is what makes "incremental" mode actually incremental — the
+      # DuckDB from last month is restored so we only fetch new data.
+      - name: Download previous state (DuckDB + models)
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-state
+          path: .
+        # If there's no previous artifact yet (first run ever), this step
+        # fails gracefully and the pipeline will do a full ingest.
+        continue-on-error: true
+
+      - name: Run pipeline
+        env:
+          PIPELINE_MODE:  ${{ github.event.inputs.mode || 'incremental' }}
+          PIPELINE_SINCE: ${{ github.event.inputs.since || '' }}
+        run: |
+          mkdir -p logs predictions models data/raw data/processed
+          if [ -n "$PIPELINE_SINCE" ]; then
+            python src/pipeline.py --mode "$PIPELINE_MODE" --since "$PIPELINE_SINCE"
+          else
+            python src/pipeline.py --mode "$PIPELINE_MODE"
+          fi
+
+      # Save the updated state so next month's run starts from here.
+      # retention-days: 90 keeps us well within free tier limits.
+      - name: Upload pipeline state for next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-state
+          path: |
+            data/caspian_weather.duckdb
+            models/
+          retention-days: 90
+
+      # Save logs and predictions separately (easier to browse in the UI)
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+
+      - name: Upload predictions
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: predictions-${{ github.run_id }}
+          path: predictions/
+          retention-days: 365
+
+      # Commit the monthly prediction CSV back to the repo so it's trackable
+      # in git history. Skipped on dry runs / failures.
+      - name: Commit predictions to repo
+        if: success()
+        run: |
+          if [ -d predictions ] && [ "$(ls -A predictions 2>/dev/null)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add predictions/
+            if git diff --staged --quiet; then
+              echo "No new predictions to commit"
+            else
+              git commit -m "Monthly predictions — $(date +%Y-%m-%d) [skip ci]"
+              git push
+            fi
+          fi

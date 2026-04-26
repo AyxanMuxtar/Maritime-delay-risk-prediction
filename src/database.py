@@ -193,6 +193,14 @@ def load_raw_data(
 
     # ── Weather historical ────────────────────────────────────────────────────
     weather_files = sorted(data_dir.glob("*_historical_*.csv"))
+
+    # If city-specific files exist, skip combined all_cities files to avoid duplicates.
+    city_specific_weather = [
+        f for f in weather_files
+        if not f.name.startswith("all_cities_")
+    ]
+    if city_specific_weather:
+        weather_files = city_specific_weather
     if weather_files:
         for f in weather_files:
             # Read CSV header to determine which columns are present

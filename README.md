@@ -1,4 +1,37 @@
 # TEAM ANEMOI
+### Roles:
+
+### 1. Məhəmməd Sadıqov, Adil Həsənov - Data Engineer
+
+**Focus:** Getting the data, storing it, and making it accessible.
+
+- **Core Ownership:** Managing the Open-Meteo API requests (both Weather and Marine) and setting up the DuckDB architecture.
+- **Key Deliverables:** The `src/` Python scripts that download historical data, handle the hourly-to-daily aggregations, and merge everything into clean tables.
+- **Interaction:** Ensure the Data Analyst and ML Engineer have a clean, ready-to-use dataset by Day 2 or 3.
+
+### 2. Ayxan Muxtar, Məhəmməd Sadıqov - Data Analyst
+
+**Focus:** Understanding the data and defining the logic.
+
+- **Core Ownership:** Exploratory Data Analysis (EDA) and defining the business logic for what constitutes a "delay-risk day" (e.g., finding the right wind speed and wave height thresholds).
+- **Key Deliverables:** Jupyter notebooks with visualizations (e.g., distribution of high-risk months across Baku vs. Aktau), correlation matrices, and identifying class imbalances.
+- **Interaction: P**rovide the ML Engineer with the exact features and thresholds needed to train the model.
+
+### 3. Ayxan Muxtar, Əli Əliqulu - ML Engineer
+
+**Focus:** Building and training the predictive engine.
+
+- **Core Ownership:** Transforming daily data into monthly aggregates, splitting the data chronologically, and training the probability classifier (Logistic Regression/XGBoost).
+- **Key Deliverables:** The model training scripts, hyperparameter tuning, and performance evaluation metrics (ROC-AUC, Precision-Recall curves).
+- **Interaction:** Rely on the Data Analyst for feature ideas and work with the Integrator to get the model ready for predictions.
+
+### 4. Əli Əliqulu, Adil Həsənov - MLOps Engineer
+
+**Focus:** Tying it all together and making it usable.
+
+- **Core Ownership:** Repository health, dependency management, and building the final inference pipeline (the script that takes the 14-day forecast and outputs the final risk probability).
+- **Key Deliverables:** Managing GitHub pull requests, ensuring the final documentation is professional, and writing the final prediction script.
+- **Interaction:** Act as the glue, taking the pipeline from the Data Engineer and the model from the ML Engineer to create the final working product.
 
 
 # Caspian Maritime Delay-Risk Forecasting
@@ -334,47 +367,9 @@ Mid-Day 5, the prediction strategy was switched from "monthly classifier" to "da
 - The monthly summary (`risk_days_predicted`, `high_risk_month_probability`) is **derived** from daily predictions, not a separate model
 - The monthly cron schedule is unchanged
 
-## 10. Team & Roles
 
 
-### Team Name: Anemoi
-
-### Roles:
-
-### 1. Məhəmməd Sadıqov, Adil Həsənov - Data Engineer
-
-**Focus:** Getting the data, storing it, and making it accessible.
-
-- **Core Ownership:** Managing the Open-Meteo API requests (both Weather and Marine) and setting up the DuckDB architecture.
-- **Key Deliverables:** The `src/` Python scripts that download historical data, handle the hourly-to-daily aggregations, and merge everything into clean tables.
-- **Interaction:** Ensure the Data Analyst and ML Engineer have a clean, ready-to-use dataset by Day 2 or 3.
-
-### 2. Ayxan Muxtar, Məhəmməd Sadıqov - Data Analyst
-
-**Focus:** Understanding the data and defining the logic.
-
-- **Core Ownership:** Exploratory Data Analysis (EDA) and defining the business logic for what constitutes a "delay-risk day" (e.g., finding the right wind speed and wave height thresholds).
-- **Key Deliverables:** Jupyter notebooks with visualizations (e.g., distribution of high-risk months across Baku vs. Aktau), correlation matrices, and identifying class imbalances.
-- **Interaction: P**rovide the ML Engineer with the exact features and thresholds needed to train the model.
-
-### 3. Ayxan Muxtar, Əli Əliqulu - ML Engineer
-
-**Focus:** Building and training the predictive engine.
-
-- **Core Ownership:** Transforming daily data into monthly aggregates, splitting the data chronologically, and training the probability classifier (Logistic Regression/XGBoost).
-- **Key Deliverables:** The model training scripts, hyperparameter tuning, and performance evaluation metrics (ROC-AUC, Precision-Recall curves).
-- **Interaction:** Rely on the Data Analyst for feature ideas and work with the Integrator to get the model ready for predictions.
-
-### 4. Əli Əliqulu, Adil Həsənov - MLOps Engineer
-
-**Focus:** Tying it all together and making it usable.
-
-- **Core Ownership:** Repository health, dependency management, and building the final inference pipeline (the script that takes the 14-day forecast and outputs the final risk probability).
-- **Key Deliverables:** Managing GitHub pull requests, ensuring the final documentation is professional, and writing the final prediction script.
-- **Interaction:** Act as the glue, taking the pipeline from the Data Engineer and the model from the ML Engineer to create the final working product.
-
-
-## 11. Repository Structure
+## 10. Repository Structure
 
 ```
 caspian-maritime-weather/
@@ -417,7 +412,7 @@ caspian-maritime-weather/
     └── pipeline.log         ← rotating, last 30 runs
 ```
 
-## 12. Quick Start
+## 11. Quick Start
 
 ```bash
 git clone https://github.com/<your-username>/caspian-maritime-weather.git
@@ -441,7 +436,7 @@ To enable automatic monthly runs:
 4. Trigger once manually from the **Actions** tab to verify
 5. Cron takes over from there
 
-## 13. Limitations & Honest Assessment
+## 12. Limitations & Honest Assessment
 
 1. **Wave height is a wind-derived proxy**, not a measurement. Accuracy is ±30% vs ERA5 reanalysis. If the model ends up heavily wave-driven, this uncertainty propagates into the risk probability.
 2. **Labels are threshold-based, not observational**. The model predicts "weather thresholds will be breached on ≥5 days," not "actual port disruptions will occur." Without AIS or port-log ground truth, this is the closest proxy available.

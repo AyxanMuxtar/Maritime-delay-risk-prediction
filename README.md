@@ -230,7 +230,7 @@ Computed in `analytics.monthly_summary` via SQL window functions:
 
 This is an 8-day sprint. Days 1–5 (Week 1: Data Engineering) are complete.
 
-### Day 1 — Project Setup & API Exploration
+### April 20 — Project Setup & API Exploration
 - Identified five target ports and their coordinates
 - Mapped Open-Meteo Archive API endpoints, variables, and rate limits
 - Explored visibility availability (discovered ERA5 archive does not serve it for the Caspian)
@@ -238,7 +238,7 @@ This is an 8-day sprint. Days 1–5 (Week 1: Data Engineering) are complete.
 - Bootstrapped `src/api_client.py` and the initial `src/config.py`
 - **Deliverable**: `notebooks/day_01_exploration.ipynb`
 
-### Day 2 — Production Ingestion
+### April 21 — Production Ingestion
 - Built `src/ingestion.py` — production HTTP client using stdlib `urllib` only (no `requests` dependency)
 - Implemented retry logic with exponential backoff and `Retry-After` header handling for HTTP 429
 - Added per-city delay between fetches to stay under Open-Meteo rate limits
@@ -249,7 +249,7 @@ This is an 8-day sprint. Days 1–5 (Week 1: Data Engineering) are complete.
 - Added per-city directional fetch lookup table (`CASPIAN_FETCH_KM`) for SMB wave estimation
 - **Deliverable**: `notebooks/day_02_ingestion.ipynb`, complete raw data in `data/raw/`
 
-### Day 3 — Database Design
+### April 22 — Database Design
 - Designed three-layer schema: `raw`, `staging`, `analytics`
 - Built `src/database.py` with: `get_connection`, `create_schemas`, `create_raw_tables`, `load_raw_data`, `build_staging`, `build_analytics`, `validate_database`, `run_query`, `build_database`
 - Auto-detection of CSV files by naming pattern (weather, hourly visibility, forecasts)
@@ -257,7 +257,7 @@ This is an 8-day sprint. Days 1–5 (Week 1: Data Engineering) are complete.
 - 8 analytical SQL queries demonstrating the database works (avg temp by year, precipitation variance, top hottest days, dry days, risk seasonality, trigger frequency, monthly heatmap, high-risk months by year)
 - **Deliverable**: `notebooks/day_03_database.ipynb`
 
-### Day 4 — Cleaning & Feature Engineering
+### April 23 — Cleaning & Feature Engineering
 - Built `src/cleaning.py` — 5 functions: `handle_missing_values()`, `flag_outliers()`, `validate_date_continuity()`, `winsorize_by_city()`, `clean_raw_to_staging()`
 - Built `src/features.py` — 9 functions covering rolling, seasonal, range, degree-days, anomaly, lag, wave-proxy, full-pipeline orchestrator, analytics-layer builder
 - **Decision: per-city precipitation winsorizing** (Anzali = 60mm cap, others 25–40mm) to prevent one wet station from dominating cross-city statistics
@@ -269,7 +269,7 @@ This is an 8-day sprint. Days 1–5 (Week 1: Data Engineering) are complete.
 - Wrote `reports/data_quality_report.md` — formal 5-section trust assessment
 - **Deliverable**: `notebooks/day_04_cleaning.ipynb`
 
-### Day 5 — Pipeline Automation & Quality Gates
+### April 24 — Pipeline Automation & Quality Gates
 - Built `src/pipeline.py` — single-CLI orchestrator with `--mode full`, `--mode incremental`, `--since`, `--dry-run`, `--no-train`, `--no-predict`, `--strict-freshness` flags
 - Built `src/quality_checks.py` — 6 automated quality gates: `row_count` (ABORT), `null_ratio` (WARN), `date_continuity` (WARN), `value_ranges` (FLAG), `feature_completeness` (WARN), `freshness_monthly` (WARN)
 - Added incremental loading: `INSERT OR REPLACE` in `src/database.py`, per-city max-date detection in pipeline, 3-day overlap window for self-healing

@@ -1,4 +1,50 @@
-# TEAM ANEMOI
+# Caspian Maritime Delay-Risk Forecasting
+
+> A monthly classifier that predicts whether the next calendar month will be a
+> **high delay-risk month** for maritime operations across five Caspian Sea
+> ports, using historical weather, fog, and wind-derived wave data.
+
+---
+
+## 1. Problem Statement
+
+Maritime operations across the Caspian Sea are routinely disrupted by
+storm-force winds, heavy precipitation, dense fog, and rough seas. Vessel
+operators, port authorities, and cargo planners need advance notice of
+*risky months* so they can:
+
+- adjust scheduling and crew rotations
+- buy insurance hedges
+- pre-position equipment
+- communicate realistic delivery windows to customers
+
+Today, this is done informally based on operator experience and short-range
+weather forecasts. There is no public, port-level, monthly probability of
+weather-driven disruption for the Caspian. **This project builds one.**
+
+The model answers a single question, asked once per month:
+
+> *"For each of our five ports, what is the probability that each day of next month will
+> have weather conditions severe enough to disrupt
+> normal maritime operations?"*
+
+## Why It Matters
+
+| Stakeholder | Decision the prediction informs |
+|-------------|--------------------------------|
+| **Port operations** | Staff scheduling, equipment readiness, suspension policies |
+| **Cargo planners** | Buffer days in delivery quotes, route alternatives through lower-risk ports |
+| **Vessel operators** | Crew rotations, voyage timing, fuel planning for diversions |
+| **Insurance underwriters** | Premium calibration, claim-rate forecasting |
+| **Government / coastguard** | Search-and-rescue readiness, environmental incident pre-positioning |
+
+The Caspian is a closed inland sea bordered by 5 countries (Azerbaijan,
+Kazakhstan, Iran, Turkmenistan, Russia). Its weather and wave climate is
+poorly served by global ocean reanalysis products. A purpose-built
+classifier — even one based on threshold heuristics — fills a real gap.
+
+
+## 2: TEAM ANEMOI
 ### Roles:
 
 ### 1. Məhəmməd Sadıqov, Adil Həsənov - Data Engineer
@@ -32,52 +78,6 @@
 - **Core Ownership:** Repository health, dependency management, and building the final inference pipeline (the script that takes the 14-day forecast and outputs the final risk probability).
 - **Key Deliverables:** Managing GitHub pull requests, ensuring the final documentation is professional, and writing the final prediction script.
 - **Interaction:** Act as the glue, taking the pipeline from the Data Engineer and the model from the ML Engineer to create the final working product.
-
-
-# Caspian Maritime Delay-Risk Forecasting
-
-> A monthly classifier that predicts whether the next calendar month will be a
-> **high delay-risk month** for maritime operations across five Caspian Sea
-> ports, using historical weather, fog, and wind-derived wave data.
-
----
-
-## 1. Problem Statement
-
-Maritime operations across the Caspian Sea are routinely disrupted by
-storm-force winds, heavy precipitation, dense fog, and rough seas. Vessel
-operators, port authorities, and cargo planners need advance notice of
-*risky months* so they can:
-
-- adjust scheduling and crew rotations
-- buy insurance hedges
-- pre-position equipment
-- communicate realistic delivery windows to customers
-
-Today, this is done informally based on operator experience and short-range
-weather forecasts. There is no public, port-level, monthly probability of
-weather-driven disruption for the Caspian. **This project builds one.**
-
-The model answers a single question, asked once per month:
-
-> *"For each of our five ports, what is the probability that each day of next month will
-> have weather conditions severe enough to disrupt
-> normal maritime operations?"*
-
-## 2. Why It Matters
-
-| Stakeholder | Decision the prediction informs |
-|-------------|--------------------------------|
-| **Port operations** | Staff scheduling, equipment readiness, suspension policies |
-| **Cargo planners** | Buffer days in delivery quotes, route alternatives through lower-risk ports |
-| **Vessel operators** | Crew rotations, voyage timing, fuel planning for diversions |
-| **Insurance underwriters** | Premium calibration, claim-rate forecasting |
-| **Government / coastguard** | Search-and-rescue readiness, environmental incident pre-positioning |
-
-The Caspian is a closed inland sea bordered by 5 countries (Azerbaijan,
-Kazakhstan, Iran, Turkmenistan, Russia). Its weather and wave climate is
-poorly served by global ocean reanalysis products. A purpose-built
-classifier — even one based on threshold heuristics — fills a real gap.
 
 ## 3. Target Variable
 

@@ -32,11 +32,11 @@ jobs:
       # 4. Run your actual model script
       - name: Run Prediction Script
         run: |
-          python generate_predictions.py
+          python pipeline.py
 
       # 5. Save the generated predictions folder back to GitHub
       - name: Commit and push predictions to GitHub
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update monthly delay predictions [skip ci]"
+          commit_message: "chore: update monthly delay predictions"
           file_pattern: 'predictions/**'

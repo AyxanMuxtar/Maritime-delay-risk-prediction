@@ -5,9 +5,17 @@
 (function () {
   'use strict';
 
+  // --- Constants & Config ---
   const CITY_ORDER = ['Baku', 'Aktau', 'Anzali', 'Turkmenbashi', 'Makhachkala'];
   const MONTHS = ['January','February','March','April','May','June',
                   'July','August','September','October','November','December'];
+
+  // --- Path Mappings (Matched to your GitHub Action output) ---
+  const PATHS = {
+    latestJson: 'predictions/latest.json',
+    dailyCsv: (ym) => `predictions/${ym}/daily.csv`,
+    monthlyCsv: (ym) => `predictions/${ym}/monthly.csv`
+  };
 
   // ─── Tiny CSV parser ──────────────────────────────────────────────
   function parseCSV(text) {
@@ -68,37 +76,29 @@
   }
 
   // ─── Find the latest month ─────────────────────────────────────────
-  // PRIMARY: read predictions/latest.json  {"month": "YYYY-MM"}
-  //   Written by the GitHub Action after each successful pipeline run.
-  //   No guessing, no probing — just one fetch.
-  //
-  // FALLBACK: try upcoming month, then current month, then walk back 6.
-  //   Used when latest.json doesn't exist yet (first deploy, dev environment).
   async function findLatestMonth() {
-    // --- Primary path: latest.json ---
+    // Primary path: Read from the root predictions/latest.json
     try {
-      const r = await fetch('predictions/latest.json', { cache: 'no-store' });
+      const r = await fetch(PATHS.latestJson, { cache: 'no-store' });
       if (r.ok) {
         const data = await r.json();
         if (data && data.month && /^\d{4}-\d{2}$/.test(data.month)) {
-          return data.month;
+          return data.month; // Expected output format: "2026-05"
         }
       }
     } catch (e) {
-      // latest.json missing or malformed — fall through to probe
+      console.warn("Could not load latest.json, falling back to manual probe.");
     }
 
-    // --- Fallback: probe month-by-month ---
+    // Fallback: probe month-by-month if latest.json fails
     const now = new Date();
     const probe = [];
 
-    // Try next month first (that is what the pipeline publishes on the 1st)
     let y = now.getUTCFullYear();
-    let m = now.getUTCMonth() + 2; // getUTCMonth is 0-indexed → +1, plus another +1 for next
+    let m = now.getUTCMonth() + 2; 
     if (m > 12) { m -= 12; y += 1; }
     probe.push(`${y}-${String(m).padStart(2, '0')}`);
 
-    // Then current month and 6 months back
     y = now.getUTCFullYear();
     m = now.getUTCMonth() + 1;
     for (let i = 0; i < 6; i++) {
@@ -109,11 +109,9 @@
 
     for (const ym of probe) {
       try {
-        const r = await fetch(`predictions/${ym}/daily.csv`, { cache: 'no-store' });
+        const r = await fetch(PATHS.dailyCsv(ym), { method: 'HEAD', cache: 'no-store' });
         if (r.ok) return ym;
-      } catch (e) {
-        // network error — try next
-      }
+      } catch (e) { }
     }
     return null;
   }
@@ -124,6 +122,7 @@
     const titleEl   = document.getElementById('month-title');
     const heroStats = document.getElementById('hero-stats');
     const cityGrid  = document.getElementById('city-grid');
+    
     if (!cityGrid) return;
 
     const ym = await findLatestMonth();
@@ -133,17 +132,17 @@
       cityGrid.appendChild(el('div', { className: 'notice error' },
         'No forecast data found. ',
         el('br', {}),
-        'Make sure predictions/latest.json and predictions/YYYY-MM/daily.csv ',
-        'exist in the repository at the same level as index.html.'));
+        'Make sure predictions/latest.json and predictions/YYYY-MM/daily.csv exist.'
+      ));
       return;
     }
 
-    // Fetch both CSVs
+    // Fetch daily and monthly CSVs concurrently
     let dailyText, monthlyText;
     try {
       const [dr, mr] = await Promise.all([
-        fetch(`predictions/${ym}/daily.csv`,   { cache: 'no-store' }),
-        fetch(`predictions/${ym}/monthly.csv`, { cache: 'no-store' }),
+        fetch(PATHS.dailyCsv(ym),   { cache: 'no-store' }),
+        fetch(PATHS.monthlyCsv(ym), { cache: 'no-store' }),
       ]);
       if (!dr.ok) throw new Error(`daily.csv returned HTTP ${dr.status}`);
       if (!mr.ok) throw new Error(`monthly.csv returned HTTP ${mr.status}`);
@@ -165,18 +164,19 @@
       return;
     }
 
-    // Header
+    // Render Header
     if (eyebrow)   eyebrow.textContent  = `Forecast · ${fmtMonth(ym)}`;
     if (titleEl)   titleEl.textContent  = `${fmtMonth(ym)} delay-risk forecast`;
     if (heroStats) renderHeroStats(heroStats, daily, monthly);
 
-    // City cards
+    // Render City cards
     cityGrid.innerHTML = '';
     CITY_ORDER.forEach(city => {
       const cityDays = daily
         .filter(d => d.city === city)
         .sort((a, b) => parseInt(a.day_of_month, 10) - parseInt(b.day_of_month, 10));
       const cityMonth = monthly.find(row => row.city === city);
+      
       if (cityDays.length === 0) return;
       cityGrid.appendChild(renderCityCard(city, cityDays, cityMonth));
     });
@@ -194,8 +194,8 @@
     [
       ['High-risk days',   highRiskDays,         `of ${totalDays} city-days`],
       ['High-risk months', highRiskCities,         `of ${monthly.length} cities`],
-      ['Model forecast',   totalDays - climDays,   'days with real weather data'],
-      ['Climatology',      climDays,               'days from historical averages'],
+      ['Model forecast',   totalDays - climDays, 'days with real weather data'],
+      ['Climatology',      climDays,             'days from historical averages'],
     ].forEach(([label, value, detail]) => {
       container.appendChild(el('div', { className: 'stat' },
         el('p', { className: 'stat-label' }, label),
@@ -247,10 +247,9 @@
     const list = document.getElementById('archive-list');
     if (!list) return;
 
-    // Try latest.json first to find the anchor month, then probe backwards
     let anchorMonth = null;
     try {
-      const r = await fetch('predictions/latest.json', { cache: 'no-store' });
+      const r = await fetch(PATHS.latestJson, { cache: 'no-store' });
       if (r.ok) {
         const data = await r.json();
         if (data && data.month) anchorMonth = data.month;
@@ -259,12 +258,12 @@
 
     const found = [];
     const now = new Date();
-    // Build full probe: upcoming + 24 past months
     const probe = [];
     let y = now.getUTCFullYear();
     let m = now.getUTCMonth() + 2;
     if (m > 12) { m -= 12; y += 1; }
     probe.push(`${y}-${String(m).padStart(2, '0')}`);
+    
     y = now.getUTCFullYear();
     m = now.getUTCMonth() + 1;
     for (let i = 0; i < 24; i++) {
@@ -277,7 +276,7 @@
 
     for (const ym of probe) {
       try {
-        const r = await fetch(`predictions/${ym}/monthly.csv`, { cache: 'no-store' });
+        const r = await fetch(PATHS.monthlyCsv(ym), { method: 'HEAD', cache: 'no-store' });
         if (r.ok) found.push(ym);
       } catch (e) {}
     }
@@ -287,9 +286,10 @@
       list.appendChild(el('li', { className: 'notice' }, 'No archived forecasts yet.'));
       return;
     }
+    
     found.forEach(ym => {
       const isCurrent = anchorMonth && ym === anchorMonth;
-      const link = el('a', { href: `predictions/${ym}/monthly.csv` },
+      const link = el('a', { href: PATHS.monthlyCsv(ym) },
         fmtMonth(ym), isCurrent ? ' (current)' : '');
       list.appendChild(el('li', { className: 'archive-item' },
         link,

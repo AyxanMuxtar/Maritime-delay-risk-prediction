@@ -60,52 +60,210 @@ class DailyClassifier:
     """
     Predict P(is_risk_day = 1) given daily weather features.
 
-    Day 5 implementation: per-(city, calendar_month) base rate.
-    Day 6 will replace the internals with XGBoost / RandomForest while
-    keeping the same .fit() / .predict_proba() interface.
+    Day 8 implementation: XGBoost gradient-boosted trees, with sklearn's
+    GradientBoostingClassifier and a per-(city, month) baseline as
+    fallbacks. The model is selected at fit() time based on what's
+    available; .fit() / .predict_proba() interface is identical to
+    the Day-5 stub so src/pipeline.py needs no changes.
 
     Required input columns
     ----------------------
     X must contain at minimum:
         - city
-        - month   (1..12; integer)
-    All other columns are accepted and ignored by the baseline.
-    The real Day 6 model will use the full feature set.
+    Plus the SELECTED_FEATURES list from reports/selected_features.py if
+    available — otherwise the model uses whatever numeric columns it finds.
+
+    Selection priority for the underlying classifier
+    ------------------------------------------------
+    1. xgboost.XGBClassifier  (if installed)        — preferred
+    2. sklearn.ensemble.GradientBoostingClassifier  — solid fallback
+    3. Per-(city, month) baseline                   — last resort
     """
 
-    def __init__(self):
-        self.rates: dict[tuple[str, int], float] = {}
-        self.global_rate: float = 0.5
+    def __init__(
+        self,
+        prefer: str = "auto",            # 'xgboost' | 'sklearn' | 'baseline' | 'auto'
+        random_state: int = 42,
+        scale_pos_weight: Optional[float] = None,
+    ):
+        self.prefer = prefer
+        self.random_state = random_state
+        self.scale_pos_weight = scale_pos_weight
+
+        # State filled at fit time
+        self._impl = None
+        self._impl_name = "untrained"
+        self._feature_cols: list[str] = []
+        self._city_cols: list[str] = []
+        self._impute_medians: dict = {}
+        self._baseline_rates: dict = {}
+        self._global_rate: float = 0.5
         self.trained_on_rows: int = 0
+        self.feature_importances_: dict = {}
+
+    def _select_features(self, X: pd.DataFrame) -> list[str]:
+        """Pick the feature columns to feed the underlying model."""
+        try:
+            import sys
+            repo = Path(__file__).resolve().parent.parent
+            if str(repo) not in sys.path:
+                sys.path.insert(0, str(repo))
+            from reports.selected_features import SELECTED_FEATURES  # type: ignore
+            chosen = [c for c in SELECTED_FEATURES if c in X.columns]
+            if chosen:
+                logger.info("  Using %d Day-7-selected features", len(chosen))
+                return chosen
+        except Exception:
+            pass
+
+        numeric = X.select_dtypes(include=[np.number]).columns.tolist()
+        excluded = {"is_risk_day", "year", "day_of_year", "week_of_year",
+                    "day_of_week", "quarter"}
+        return [c for c in numeric
+                if c not in excluded and not c.endswith("_is_outlier")]
+
+    def _build_design_matrix(
+        self, X: pd.DataFrame, *, fit_phase: bool,
+    ) -> np.ndarray:
+        if fit_phase:
+            self._feature_cols = self._select_features(X)
+            if "city" in X.columns:
+                self._city_cols = sorted(
+                    f"city_{c}" for c in X["city"].dropna().unique()
+                )
+            else:
+                self._city_cols = []
+
+        feat = (X[self._feature_cols].copy() if self._feature_cols
+                else pd.DataFrame(index=X.index))
+
+        if self._city_cols and "city" in X.columns:
+            dummies = pd.get_dummies(X["city"], prefix="city")
+            for c in self._city_cols:
+                if c not in dummies.columns:
+                    dummies[c] = 0
+            dummies = dummies[self._city_cols].astype(int)
+            feat = pd.concat([feat.reset_index(drop=True),
+                              dummies.reset_index(drop=True)], axis=1)
+
+        if fit_phase:
+            self._impute_medians = feat.median(numeric_only=True).to_dict()
+        feat = feat.fillna(self._impute_medians)
+
+        return feat.values.astype(float)
+
+    def _pick_implementation(self):
+        if self.prefer == "baseline":
+            return None, "baseline"
+
+        if self.prefer in ("auto", "xgboost"):
+            try:
+                from xgboost import XGBClassifier
+                return XGBClassifier(
+                    n_estimators=300, max_depth=5, learning_rate=0.05,
+                    subsample=0.9, colsample_bytree=0.9,
+                    scale_pos_weight=self.scale_pos_weight or 1.0,
+                    random_state=self.random_state,
+                    eval_metric="logloss", verbosity=0, n_jobs=-1,
+                ), "xgboost"
+            except ImportError:
+                if self.prefer == "xgboost":
+                    raise
+
+        if self.prefer in ("auto", "sklearn"):
+            from sklearn.ensemble import GradientBoostingClassifier
+            return GradientBoostingClassifier(
+                n_estimators=300, max_depth=4, learning_rate=0.05,
+                subsample=0.9, random_state=self.random_state,
+            ), "sklearn_gbm"
+
+        return None, "baseline"
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "DailyClassifier":
-        if "city" not in X.columns or "month" not in X.columns:
-            raise ValueError("X must contain 'city' and 'month' columns")
-        df = X[["city", "month"]].copy()
-        df["_y"] = y.values
-        grouped = df.groupby(["city", "month"])["_y"].mean()
-        self.rates = grouped.to_dict()
-        self.global_rate = float(df["_y"].mean())
-        self.trained_on_rows = len(df)
+        if "city" not in X.columns:
+            raise ValueError("X must contain a 'city' column")
+
+        y_arr = np.asarray(y).astype(int)
+        self._global_rate = float(y_arr.mean())
+        self.trained_on_rows = len(y_arr)
+
+        impl, impl_name = self._pick_implementation()
+        self._impl_name = impl_name
+
+        if impl is None:
+            X_local = X.copy()
+            if "month" not in X_local.columns:
+                X_local["month"] = pd.to_datetime(X_local.get("date", pd.NaT)).dt.month
+            df_b = X_local[["city", "month"]].copy()
+            df_b["_y"] = y_arr
+            self._baseline_rates = (
+                df_b.groupby(["city", "month"])["_y"].mean().to_dict()
+            )
+            logger.info(
+                "  DailyClassifier[baseline] fit on %d rows, %d (city,month) cells",
+                self.trained_on_rows, len(self._baseline_rates),
+            )
+            return self
+
+        if (impl_name == "xgboost"
+                and self.scale_pos_weight is None
+                and y_arr.sum() > 0):
+            n_pos = int(y_arr.sum())
+            n_neg = int(len(y_arr) - n_pos)
+            try:
+                impl.set_params(scale_pos_weight=n_neg / max(n_pos, 1))
+            except Exception:
+                pass
+
+        X_mat = self._build_design_matrix(X, fit_phase=True)
+        impl.fit(X_mat, y_arr)
+        self._impl = impl
+
+        try:
+            cols = list(self._feature_cols) + list(self._city_cols)
+            importances = getattr(impl, "feature_importances_", None)
+            if importances is not None:
+                self.feature_importances_ = dict(zip(cols, importances.tolist()))
+        except Exception:
+            pass
+
         logger.info(
-            "  DailyClassifier fit on %d rows; %d (city,month) cells; "
-            "global positive rate = %.3f",
-            self.trained_on_rows, len(self.rates), self.global_rate,
+            "  DailyClassifier[%s] fit on %d rows; %d features (%d weather + %d city dummies); "
+            "positive rate = %.3f",
+            impl_name, self.trained_on_rows,
+            len(self._feature_cols) + len(self._city_cols),
+            len(self._feature_cols), len(self._city_cols), self._global_rate,
         )
         return self
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        if "city" not in X.columns or "month" not in X.columns:
-            raise ValueError("X must contain 'city' and 'month' columns")
+        if self._impl is None and not self._baseline_rates:
+            raise RuntimeError("Model is not fitted; call .fit() first")
 
-        keys = list(zip(X["city"].values, X["month"].astype(int).values))
-        probs = np.array([self.rates.get(k, self.global_rate) for k in keys],
-                         dtype=float)
-        # sklearn convention: shape (n, 2) with [P(0), P(1)]
-        return np.column_stack([1 - probs, probs])
+        if self._impl is None:
+            X_local = X.copy()
+            if "month" not in X_local.columns:
+                X_local["month"] = pd.to_datetime(X_local.get("date", pd.NaT)).dt.month
+            keys = list(zip(X_local["city"].values,
+                            X_local["month"].astype(int).values))
+            probs = np.array(
+                [self._baseline_rates.get(k, self._global_rate) for k in keys],
+                dtype=float,
+            )
+            return np.column_stack([1 - probs, probs])
+
+        X_mat = self._build_design_matrix(X, fit_phase=False)
+        proba = self._impl.predict_proba(X_mat)
+        if proba.ndim == 1:
+            proba = np.column_stack([1 - proba, proba])
+        return proba
 
     def predict(self, X: pd.DataFrame, threshold: float = 0.5) -> np.ndarray:
         return (self.predict_proba(X)[:, 1] >= threshold).astype(int)
+
+    @property
+    def model_type(self) -> str:
+        return self._impl_name
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -253,10 +411,10 @@ def train_model(
 
     return {
         "rows_trained":   int(model.trained_on_rows),
-        "city_month_cells": len(model.rates),
-        "positive_rate":  round(model.global_rate, 4),
+        "n_features":     len(model._feature_cols) + len(model._city_cols),
+        "positive_rate":  round(model._global_rate, 4),
         "model_path":     str(model_path),
-        "model_type":     "DailyClassifier (Day-5 baseline; Day 6 swaps to XGBoost)",
+        "model_type":     model.model_type,
     }
 
 

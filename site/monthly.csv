@@ -1,0 +1,6 @@
+city,target_month,risk_days_predicted,high_risk_month_probability,n_short_horizon_days,n_climatology_days
+Baku,2026-05,2,0.18,16,15
+Aktau,2026-05,3,0.32,16,15
+Anzali,2026-05,4,0.65,16,15
+Turkmenbashi,2026-05,2,0.22,16,15
+Makhachkala,2026-05,3,0.45,16,15

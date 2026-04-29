@@ -1,0 +1,8 @@
+# Add this at the very end of your GitHub Action workflow, 
+# AFTER your Python/Model script generates the CSVs:
+
+      - name: Commit and push predictions
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update monthly delay predictions [skip ci]"
+          file_pattern: 'predictions/**'

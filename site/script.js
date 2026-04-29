@@ -1,8 +1,5 @@
 // =====================================================================
-// Caspian Risk - client-side CSV loader and renderer
-// =====================================================================
-// Reads predictions/YYYY-MM/{daily,monthly}.csv from the same origin,
-// renders city cards with calendar grids. No build step required.
+// Caspian Risk — client-side CSV loader and renderer
 // =====================================================================
 
 (function () {
@@ -12,12 +9,10 @@
   const MONTHS = ['January','February','March','April','May','June',
                   'July','August','September','October','November','December'];
 
-  // ─── Tiny CSV parser (handles quoted fields with commas/newlines) ──
+  // ─── Tiny CSV parser ──────────────────────────────────────────────
   function parseCSV(text) {
     const rows = [];
-    let cur = [];
-    let field = '';
-    let inQuotes = false;
+    let cur = [], field = '', inQuotes = false;
     for (let i = 0; i < text.length; i++) {
       const c = text[i];
       if (inQuotes) {
@@ -28,21 +23,20 @@
         if (c === '"') { inQuotes = true; }
         else if (c === ',') { cur.push(field); field = ''; }
         else if (c === '\n') { cur.push(field); rows.push(cur); cur = []; field = ''; }
-        else if (c === '\r') { /* skip */ }
+        else if (c === '\r') {}
         else { field += c; }
       }
     }
-    if (field.length > 0 || cur.length > 0) {
-      cur.push(field);
-      rows.push(cur);
-    }
+    if (field.length > 0 || cur.length > 0) { cur.push(field); rows.push(cur); }
     if (rows.length === 0) return [];
     const headers = rows[0];
-    return rows.slice(1).filter(r => r.length === headers.length).map(r => {
-      const obj = {};
-      headers.forEach((h, i) => obj[h.trim()] = r[i]);
-      return obj;
-    });
+    return rows.slice(1)
+      .filter(r => r.length === headers.length && r.some(v => v.trim() !== ''))
+      .map(r => {
+        const obj = {};
+        headers.forEach((h, i) => obj[h.trim()] = (r[i] || '').trim());
+        return obj;
+      });
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────
@@ -53,17 +47,17 @@
 
   function riskClass(p, source) {
     if (source === 'climatology') return 'risk-clim';
-    if (p >= 0.5) return 'risk-high';
+    if (p >= 0.5)  return 'risk-high';
     if (p >= 0.25) return 'risk-med';
     return 'risk-low';
   }
 
-  function el(tag, attrs = {}, ...children) {
+  function el(tag, attrs, ...children) {
+    attrs = attrs || {};
     const e = document.createElement(tag);
     Object.entries(attrs).forEach(([k, v]) => {
       if (k === 'className') e.className = v;
       else if (k === 'style') e.style.cssText = v;
-      else if (k === 'html') e.innerHTML = v;
       else e.setAttribute(k, v);
     });
     children.flat().forEach(c => {
@@ -73,95 +67,135 @@
     return e;
   }
 
-  // ─── Discover the latest available month ──────────────────────────
-  // Forecasts cover the upcoming month. Try +1 month first (the forecast
-  // for the month ahead), then current month, then walk back up to 6 months.
-  // This works because Vercel returns 404 for missing files.
+  // ─── Find the latest month ─────────────────────────────────────────
+  // PRIMARY: read predictions/latest.json  {"month": "YYYY-MM"}
+  //   Written by the GitHub Action after each successful pipeline run.
+  //   No guessing, no probing — just one fetch.
+  //
+  // FALLBACK: try upcoming month, then current month, then walk back 6.
+  //   Used when latest.json doesn't exist yet (first deploy, dev environment).
   async function findLatestMonth() {
+    // --- Primary path: latest.json ---
+    try {
+      const r = await fetch('predictions/latest.json', { cache: 'no-store' });
+      if (r.ok) {
+        const data = await r.json();
+        if (data && data.month && /^\d{4}-\d{2}$/.test(data.month)) {
+          return data.month;
+        }
+      }
+    } catch (e) {
+      // latest.json missing or malformed — fall through to probe
+    }
+
+    // --- Fallback: probe month-by-month ---
     const now = new Date();
     const probe = [];
-    // +1 first (the upcoming month, which the cron is expected to publish on the 1st)
+
+    // Try next month first (that is what the pipeline publishes on the 1st)
     let y = now.getUTCFullYear();
-    let m = now.getUTCMonth() + 2;  // +1 from getUTCMonth which is 0-indexed, +1 again for next month
+    let m = now.getUTCMonth() + 2; // getUTCMonth is 0-indexed → +1, plus another +1 for next
     if (m > 12) { m -= 12; y += 1; }
-    probe.push([y, m]);
-    // Then current month, walking back
+    probe.push(`${y}-${String(m).padStart(2, '0')}`);
+
+    // Then current month and 6 months back
     y = now.getUTCFullYear();
     m = now.getUTCMonth() + 1;
     for (let i = 0; i < 6; i++) {
-      probe.push([y, m]);
+      probe.push(`${y}-${String(m).padStart(2, '0')}`);
       m -= 1;
       if (m === 0) { m = 12; y -= 1; }
     }
-    for (const [yy, mm] of probe) {
-      const ym = `${yy}-${String(mm).padStart(2, '0')}`;
+
+    for (const ym of probe) {
       try {
-        const r = await fetch(`predictions/${ym}/daily.csv`, { method: 'HEAD' });
+        const r = await fetch(`predictions/${ym}/daily.csv`, { cache: 'no-store' });
         if (r.ok) return ym;
-      } catch (e) { /* network error — skip and continue */ }
+      } catch (e) {
+        // network error — try next
+      }
     }
     return null;
   }
 
-  // ─── Load and render the latest forecast ──────────────────────────
+  // ─── Render the forecast ──────────────────────────────────────────
   async function loadLatest() {
-    const eyebrow = document.getElementById('month-eyebrow');
-    const titleEl = document.getElementById('month-title');
+    const eyebrow   = document.getElementById('month-eyebrow');
+    const titleEl   = document.getElementById('month-title');
     const heroStats = document.getElementById('hero-stats');
-    const cityGrid = document.getElementById('city-grid');
+    const cityGrid  = document.getElementById('city-grid');
+    if (!cityGrid) return;
 
     const ym = await findLatestMonth();
+
     if (!ym) {
+      cityGrid.innerHTML = '';
       cityGrid.appendChild(el('div', { className: 'notice error' },
-        'No forecast data found. Predictions are generated monthly by GitHub Actions; check back after the 1st of the next month.'));
+        'No forecast data found. ',
+        el('br', {}),
+        'Make sure predictions/latest.json and predictions/YYYY-MM/daily.csv ',
+        'exist in the repository at the same level as index.html.'));
       return;
     }
 
+    // Fetch both CSVs
     let dailyText, monthlyText;
     try {
-      [dailyText, monthlyText] = await Promise.all([
-        fetch(`predictions/${ym}/daily.csv`).then(r => r.text()),
-        fetch(`predictions/${ym}/monthly.csv`).then(r => r.text()),
+      const [dr, mr] = await Promise.all([
+        fetch(`predictions/${ym}/daily.csv`,   { cache: 'no-store' }),
+        fetch(`predictions/${ym}/monthly.csv`, { cache: 'no-store' }),
       ]);
+      if (!dr.ok) throw new Error(`daily.csv returned HTTP ${dr.status}`);
+      if (!mr.ok) throw new Error(`monthly.csv returned HTTP ${mr.status}`);
+      [dailyText, monthlyText] = await Promise.all([dr.text(), mr.text()]);
     } catch (err) {
+      cityGrid.innerHTML = '';
       cityGrid.appendChild(el('div', { className: 'notice error' },
-        'Could not load prediction CSVs. Try refreshing.'));
+        `Could not load forecast for ${ym}: ${err.message}`));
       return;
     }
 
-    const daily = parseCSV(dailyText);
+    const daily   = parseCSV(dailyText);
     const monthly = parseCSV(monthlyText);
 
-    // Update header
-    eyebrow.textContent = `Forecast · ${fmtMonth(ym)}`;
-    titleEl.textContent = `${fmtMonth(ym)} delay-risk forecast`;
-    heroStats.innerHTML = '';
-    renderHeroStats(heroStats, daily, monthly);
+    if (daily.length === 0) {
+      cityGrid.innerHTML = '';
+      cityGrid.appendChild(el('div', { className: 'notice error' },
+        `Loaded daily.csv for ${ym} but it parsed to 0 rows. Check the file.`));
+      return;
+    }
 
-    // Render city cards
+    // Header
+    if (eyebrow)   eyebrow.textContent  = `Forecast · ${fmtMonth(ym)}`;
+    if (titleEl)   titleEl.textContent  = `${fmtMonth(ym)} delay-risk forecast`;
+    if (heroStats) renderHeroStats(heroStats, daily, monthly);
+
+    // City cards
     cityGrid.innerHTML = '';
     CITY_ORDER.forEach(city => {
-      const cityDays = daily.filter(d => d.city === city)
+      const cityDays = daily
+        .filter(d => d.city === city)
         .sort((a, b) => parseInt(a.day_of_month, 10) - parseInt(b.day_of_month, 10));
-      const cityMonth = monthly.find(m => m.city === city);
+      const cityMonth = monthly.find(row => row.city === city);
       if (cityDays.length === 0) return;
       cityGrid.appendChild(renderCityCard(city, cityDays, cityMonth));
     });
   }
 
   function renderHeroStats(container, daily, monthly) {
-    const totalDays = daily.length;
-    const highRiskDays = daily.filter(d => parseFloat(d.probability) >= 0.5).length;
-    const climDays = daily.filter(d => d.source === 'climatology').length;
+    container.innerHTML = '';
+    const totalDays      = daily.length;
+    const highRiskDays   = daily.filter(d => parseFloat(d.probability) >= 0.5).length;
+    const climDays       = daily.filter(d => d.source === 'climatology').length;
     const highRiskCities = monthly.filter(
       m => parseFloat(m.high_risk_month_probability || 0) >= 0.5
     ).length;
 
     [
-      ['High-risk days', highRiskDays, `of ${totalDays} city-days forecast`],
-      ['High-risk months', highRiskCities, `of ${monthly.length} cities`],
-      ['Forecast horizon', totalDays - climDays, 'days from real forecasts'],
-      ['Beyond horizon',  climDays, 'days from climatology'],
+      ['High-risk days',   highRiskDays,         `of ${totalDays} city-days`],
+      ['High-risk months', highRiskCities,         `of ${monthly.length} cities`],
+      ['Model forecast',   totalDays - climDays,   'days with real weather data'],
+      ['Climatology',      climDays,               'days from historical averages'],
     ].forEach(([label, value, detail]) => {
       container.appendChild(el('div', { className: 'stat' },
         el('p', { className: 'stat-label' }, label),
@@ -178,29 +212,25 @@
       return p >= 0.25 && p < 0.5;
     }).length;
     const monthProb = monthSummary
-      ? Math.round(parseFloat(monthSummary.high_risk_month_probability) * 100)
+      ? Math.round(parseFloat(monthSummary.high_risk_month_probability || 0) * 100)
       : null;
 
-    const summary = el('div', { className: 'city-summary' },
-      el('strong', {}, String(high)), ' high-risk · ',
-      el('strong', {}, String(med)), ' elevated',
-      monthProb != null
-        ? el('span', {}, ` · month risk ${monthProb}%`)
-        : null,
-    );
+    const summary = el('div', { className: 'city-summary' });
+    summary.innerHTML =
+      `<strong>${high}</strong> high-risk &nbsp;·&nbsp; <strong>${med}</strong> elevated` +
+      (monthProb != null ? ` &nbsp;·&nbsp; month risk ${monthProb}%` : '');
 
     const calendar = el('div', { className: 'calendar' });
     days.forEach(d => {
-      const p = parseFloat(d.probability);
+      const p   = parseFloat(d.probability);
       const cls = riskClass(p, d.source);
-      const cell = el('div', {
-        className: 'day-cell ' + cls,
-        title: `Day ${d.day_of_month} · ${(p*100).toFixed(0)}% risk · ${d.source}`,
+      calendar.appendChild(el('div', {
+        className: `day-cell ${cls}`,
+        title: `Day ${d.day_of_month} · ${Math.round(p*100)}% · ${d.source}`,
       },
-        el('span', { className: 'day-num' }, d.day_of_month),
+        el('span', { className: 'day-num' }, String(d.day_of_month)),
         el('span', { className: 'day-prob' }, `${Math.round(p*100)}%`),
-      );
-      calendar.appendChild(cell);
+      ));
     });
 
     return el('article', { className: 'city-card' },
@@ -212,49 +242,64 @@
     );
   }
 
-  // ─── Page-specific entry point ────────────────────────────────────
-  if (document.getElementById('city-grid')) {
-    loadLatest();
-  }
-
-  // ─── Archive page ─────────────────────────────────────────────────
-  if (document.getElementById('archive-list')) {
-    loadArchive();
-  }
-
+  // ─── Archive page ──────────────────────────────────────────────────
   async function loadArchive() {
     const list = document.getElementById('archive-list');
+    if (!list) return;
+
+    // Try latest.json first to find the anchor month, then probe backwards
+    let anchorMonth = null;
+    try {
+      const r = await fetch('predictions/latest.json', { cache: 'no-store' });
+      if (r.ok) {
+        const data = await r.json();
+        if (data && data.month) anchorMonth = data.month;
+      }
+    } catch (e) {}
+
     const found = [];
     const now = new Date();
-    // Check upcoming month, current, and 24 past months
+    // Build full probe: upcoming + 24 past months
+    const probe = [];
     let y = now.getUTCFullYear();
-    let m = now.getUTCMonth() + 2;  // upcoming month
+    let m = now.getUTCMonth() + 2;
     if (m > 12) { m -= 12; y += 1; }
-    const probes = [[y, m]];
+    probe.push(`${y}-${String(m).padStart(2, '0')}`);
     y = now.getUTCFullYear();
     m = now.getUTCMonth() + 1;
     for (let i = 0; i < 24; i++) {
-      probes.push([y, m]);
+      probe.push(`${y}-${String(m).padStart(2, '0')}`);
       m -= 1;
       if (m === 0) { m = 12; y -= 1; }
     }
-    for (const [yy, mm] of probes) {
-      const ym = `${yy}-${String(mm).padStart(2, '0')}`;
+
+    list.innerHTML = '<li class="notice">Scanning for forecasts…</li>';
+
+    for (const ym of probe) {
       try {
-        const r = await fetch(`predictions/${ym}/monthly.csv`, { method: 'HEAD' });
+        const r = await fetch(`predictions/${ym}/monthly.csv`, { cache: 'no-store' });
         if (r.ok) found.push(ym);
-      } catch (e) { /* skip */ }
+      } catch (e) {}
     }
+
+    list.innerHTML = '';
     if (found.length === 0) {
-      list.appendChild(el('li', { className: 'notice' },
-        'No archived forecasts yet.'));
+      list.appendChild(el('li', { className: 'notice' }, 'No archived forecasts yet.'));
       return;
     }
     found.forEach(ym => {
+      const isCurrent = anchorMonth && ym === anchorMonth;
+      const link = el('a', { href: `predictions/${ym}/monthly.csv` },
+        fmtMonth(ym), isCurrent ? ' (current)' : '');
       list.appendChild(el('li', { className: 'archive-item' },
-        el('a', { href: `predictions/${ym}/monthly.csv` }, fmtMonth(ym)),
+        link,
         el('span', { className: 'meta' }, ym),
       ));
     });
   }
+
+  // ─── Entry points ──────────────────────────────────────────────────
+  if (document.getElementById('city-grid'))    loadLatest();
+  if (document.getElementById('archive-list')) loadArchive();
+
 })();

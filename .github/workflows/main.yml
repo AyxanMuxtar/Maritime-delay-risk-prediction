@@ -38,5 +38,5 @@ jobs:
       - name: Commit and push predictions to GitHub
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update monthly delay predictions [skip ci]"
+          commit_message: "chore: update monthly delay predictions"
           file_pattern: 'predictions/**'

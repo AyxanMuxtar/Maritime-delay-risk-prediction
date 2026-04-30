@@ -288,6 +288,65 @@ def add_wave_proxy(df: pd.DataFrame) -> pd.DataFrame:
 # 8. Orchestration — build the full feature set
 # ══════════════════════════════════════════════════════════════════════════════
 
+def add_short_term_risk_features(
+    df: pd.DataFrame,
+    group_by: str = "city",
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """
+    Add short-term, physically meaningful risk features:
+    - 1-day changes
+    - 3-day extremes
+    - combined risk signals
+    """
+    out = df.sort_values([group_by, date_col]).copy()
+
+    # --- Changes (trend signals) ---
+    if "wind_speed_10m_max" in out.columns:
+        out["wind_change_1d"] = (
+            out.groupby(group_by)["wind_speed_10m_max"].diff().fillna(0)
+        )
+
+    if "precipitation_sum" in out.columns:
+        out["precip_change_1d"] = (
+            out.groupby(group_by)["precipitation_sum"].diff().fillna(0)
+        )
+
+    # --- Short-term windows ---
+    if "wind_speed_10m_max" in out.columns:
+        out["wind_3d_max"] = (
+            out.groupby(group_by)["wind_speed_10m_max"]
+            .transform(lambda s: s.rolling(3, min_periods=1).max())
+        )
+
+    if "precipitation_sum" in out.columns:
+        out["precip_3d_sum"] = (
+            out.groupby(group_by)["precipitation_sum"]
+            .transform(lambda s: s.rolling(3, min_periods=1).sum())
+        )
+
+    # --- Meaningful thresholds ---
+    if "wind_3d_max" in out.columns:
+        out["strong_wind_recent"] = (out["wind_3d_max"] >= 40).astype(int)
+
+    if "wind_3d_max" in out.columns and "precip_3d_sum" in out.columns:
+        out["wind_precip_combo"] = (
+            (out["wind_3d_max"] >= 40) &
+            (out["precip_3d_sum"] >= 5)
+        ).astype(int)
+
+    # --- Visibility context ---
+    if "visibility_min" in out.columns:
+        out["low_visibility_recent"] = (
+            out.groupby(group_by)["visibility_min"]
+            .transform(lambda s: s.rolling(3, min_periods=1).min())
+            .lt(3000)
+            .astype(int)
+        )
+
+    return out
+
+
 def engineer_all_features(
     df:       pd.DataFrame,
     city_col: str = "city",
@@ -327,6 +386,9 @@ def engineer_all_features(
 
     df = add_lag_features(df, group_by=city_col, date_col=date_col)
     logger.info("  ✓ lag features")
+
+    df = add_short_term_risk_features(df)
+    logger.info("  ✓ short-term risk features")
 
     logger.info("Feature pipeline complete — %d columns total", len(df.columns))
     return df

@@ -12,15 +12,22 @@ temperature_2m_min,DROP,0.083,|r|=0.97 with apparent_temperature_mean; weaker ta
 wind_gusts_10m_max,DROP,0.587,|r|=0.86 with wave_height; weaker target signal (|r_target|=0.59 vs 0.69)
 wind_speed_10m_max,DROP,0.597,|r|=0.92 with wave_height; weaker target signal (|r_target|=0.60 vs 0.69)
 apparent_temperature_mean,KEEP,0.172,
+low_visibility_recent,KEEP,0.068,
 month_sin,KEEP,0.036,
+precip_3d_sum,KEEP,0.167,
+precip_change_1d,KEEP,0.162,
 precipitation_sum,KEEP,0.282,
 relative_humidity_2m_mean,KEEP,0.058,
 shortwave_radiation_sum,KEEP,0.128,
 snowfall_sum,KEEP,0.157,
+strong_wind_recent,KEEP,0.489,
 surface_pressure_mean,KEEP,0.005,
 temp_range_c,KEEP,0.218,
 visibility_hours_below_1km,KEEP,0.204,
 visibility_mean,KEEP,0.077,
 visibility_min,KEEP,0.081,
 wave_height,KEEP,0.687,
+wind_3d_max,KEEP,0.447,
+wind_change_1d,KEEP,0.298,
+wind_precip_combo,KEEP,0.243,
 is_risk_day,TARGET,1.0,"this is the prediction target, not a feature"

@@ -503,6 +503,87 @@ def _all_dates_in_month(target_month: str) -> list[date]:
     return [date(y, m, d) for d in range(1, n_days + 1)]
 
 
+def _build_forecast_features_with_lookback(
+    conn,
+    forecast_df: pd.DataFrame,
+    feature_cols: list[str],
+    lookback_days: int = 7,
+) -> pd.DataFrame:
+    """
+    Build live prediction features using recent historical context.
+
+    Why:
+    - wind_change_1d needs the previous day
+    - precip_change_1d needs the previous day
+    - 3-day rolling features need recent rows
+    - lag features need previous rows
+
+    Flow:
+        recent staging history + forecast rows
+        -> engineer_all_features()
+        -> keep only forecast rows
+    """
+    from src.features import engineer_all_features
+
+    if forecast_df is None or forecast_df.empty:
+        return pd.DataFrame()
+
+    forecast_df = forecast_df.copy()
+    forecast_df["date"] = pd.to_datetime(forecast_df["date"])
+
+    min_forecast_date = forecast_df["date"].min()
+    lookback_start = min_forecast_date - pd.Timedelta(days=lookback_days)
+
+    history_df = conn.execute("""
+        SELECT *
+        FROM staging.weather_daily
+        WHERE date >= ?
+          AND date < ?
+        ORDER BY city, date
+    """, [lookback_start.date(), min_forecast_date.date()]).fetchdf()
+
+    if history_df is None or history_df.empty:
+        logger.warning(
+            "No lookback rows found in staging.weather_daily. "
+            "Rolling/change features may be less reliable."
+        )
+        history_df = pd.DataFrame()
+    else:
+        history_df["date"] = pd.to_datetime(history_df["date"])
+
+    # Align history and forecast columns safely
+    all_cols = sorted(set(history_df.columns) | set(forecast_df.columns))
+
+    for col in all_cols:
+        if col not in history_df.columns:
+            history_df[col] = np.nan
+        if col not in forecast_df.columns:
+            forecast_df[col] = np.nan
+
+    combined = pd.concat(
+        [history_df[all_cols], forecast_df[all_cols]],
+        ignore_index=True,
+    )
+
+    combined = combined.sort_values(["city", "date"]).reset_index(drop=True)
+
+    # Rebuild the SAME feature pipeline used for analytics/training
+    engineered = engineer_all_features(combined)
+
+    # Keep only forecast rows after features are created
+    forecast_dates = set(forecast_df["date"].dt.date)
+
+    pred_df = engineered[
+        engineered["date"].dt.date.isin(forecast_dates)
+    ].copy()
+
+    # Make sure every expected model feature exists
+    for col in feature_cols:
+        if col not in pred_df.columns:
+            pred_df[col] = np.nan
+
+    return pred_df
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. Predict — orchestrates short_horizon model + climatology
 # ══════════════════════════════════════════════════════════════════════════════
@@ -582,6 +663,20 @@ def predict_next_month(
         cities, CITIES, today, short_horizon_end, FORECAST_VARIABLES,
     )
 
+    # Build forecast features using a 7-day lookback window.
+    # This is required for lag/change/rolling features.
+    forecast_features_df = None
+
+    model_feature_cols = getattr(model, "_feature_cols", None)
+
+    if forecast_df is not None and model_feature_cols:
+        forecast_features_df = _build_forecast_features_with_lookback(
+            conn=conn,
+            forecast_df=forecast_df,
+            feature_cols=model_feature_cols,
+            lookback_days=7,
+        )
+
     # Build the full prediction DataFrame
     rows = []
     for city in cities:
@@ -595,19 +690,28 @@ def predict_next_month(
             )
 
             if use_short_horizon:
-                # Try to find features for this (city, date) in the forecast df
-                fc_row = forecast_df[
-                    (forecast_df["city"] == city)
-                    & (pd.to_datetime(forecast_df["date"]).dt.date == d)
-                ]
+                # Use engineered forecast features, not raw forecast rows.
+                if forecast_features_df is not None and len(forecast_features_df) > 0:
+                    fc_row = forecast_features_df[
+                        (forecast_features_df["city"] == city)
+                        & (pd.to_datetime(forecast_features_df["date"]).dt.date == d)
+                    ]
+                else:
+                    fc_row = pd.DataFrame()
+
                 if len(fc_row) == 0:
-                    # Forecast didn't cover this day — fall back
+                    # Forecast did not cover this day, or features could not be built.
                     p = clim.predict_proba(city, day_of_year)
                     src = "climatology"
                 else:
                     fc_row = fc_row.copy()
-                    if "month" not in fc_row.columns:
-                        fc_row["month"] = d.month
+
+                    # Ensure the row has the exact columns the trained model expects.
+                    if model_feature_cols:
+                        for col in model_feature_cols:
+                            if col not in fc_row.columns:
+                                fc_row[col] = np.nan
+
                     p = float(model.predict_proba(fc_row)[:, 1][0])
                     src = "short_horizon"
             else:

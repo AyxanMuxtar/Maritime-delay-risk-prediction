@@ -253,6 +253,13 @@ def check_feature_completeness(
         "hdd", "cdd", "temp_range_c",
         "month_sin", "month_cos", "doy_sin", "doy_cos",
         "is_risk_day",
+        "wind_change_1d",
+        "precip_change_1d",
+        "wind_3d_max",
+        "precip_3d_sum",
+        "strong_wind_recent",
+        "wind_precip_combo",
+        "low_visibility_recent",
     ]
 
     # Check presence

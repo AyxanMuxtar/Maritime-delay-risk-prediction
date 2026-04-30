@@ -1,4 +1,4 @@
 Model,Accuracy,F1,ROC-AUC,Brier,F1 CI width,AUC CI width,Notes
 Climatology,0.915,0.013,0.662,0.078,0.04,0.085,"Naive baseline: per-(city,doy) historical rate"
-LogisticRegression,0.677,0.264,0.738,0.209,0.078,0.071,Linear; interpretable coefficients
-XGBoost,0.727,0.278,0.749,0.185,0.092,0.068,Tree ensemble; non-linear; regularised
+LogisticRegression,0.677,0.264,0.739,0.209,0.078,0.071,Linear; interpretable coefficients
+XGBoost,0.728,0.274,0.749,0.185,0.092,0.068,Tree ensemble; non-linear; regularised

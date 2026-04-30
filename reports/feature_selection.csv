@@ -1,5 +1,5 @@
 feature,decision,corr_with_target,reason
-cdd,DROP,0.102,|r|=0.87 with apparent_temperature_mean; weaker target signal (|r_target|=0.10 vs 0.17)
+cdd,DROP,0.101,|r|=0.87 with apparent_temperature_mean; weaker target signal (|r_target|=0.10 vs 0.17)
 dew_point_2m_mean,DROP,0.107,|r|=0.95 with apparent_temperature_mean; weaker target signal (|r_target|=0.11 vs 0.17)
 doy_cos,DROP,0.058,|r|=0.89 with shortwave_radiation_sum; weaker target signal (|r_target|=0.06 vs 0.13)
 doy_sin,DROP,0.018,|r|=0.95 with month_sin; weaker target signal (|r_target|=0.02 vs 0.04)
@@ -13,7 +13,7 @@ wind_gusts_10m_max,DROP,0.587,|r|=0.86 with wave_height; weaker target signal (|
 wind_speed_10m_max,DROP,0.597,|r|=0.92 with wave_height; weaker target signal (|r_target|=0.60 vs 0.69)
 apparent_temperature_mean,KEEP,0.172,
 month_sin,KEEP,0.036,
-precipitation_sum,KEEP,0.283,
+precipitation_sum,KEEP,0.282,
 relative_humidity_2m_mean,KEEP,0.058,
 shortwave_radiation_sum,KEEP,0.128,
 snowfall_sum,KEEP,0.157,

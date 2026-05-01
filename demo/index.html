@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Caspian Maritime Delay-Risk Forecast</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Caspian Maritime Forecast Demo</p>
+        <h1>Maritime Delay-Risk Forecast</h1>
+        <p class="subtitle">
+          Daily probability that weather conditions may become risky for maritime operations
+          across five Caspian Sea ports.
+        </p>
+      </div>
+
+      <section class="summary-grid">
+        <div class="summary-card">
+          <span class="label">Target month</span>
+          <strong id="targetMonth">Loading...</strong>
+        </div>
+        <div class="summary-card">
+          <span class="label">Cities</span>
+          <strong id="cityCount">—</strong>
+        </div>
+        <div class="summary-card">
+          <span class="label">High-risk days</span>
+          <strong id="highRiskDays">—</strong>
+        </div>
+        <div class="summary-card">
+          <span class="label">Model threshold</span>
+          <strong>10%</strong>
+        </div>
+      </section>
+    </header>
+
+    <section class="info-panel">
+      <h2>How to read this</h2>
+
+      <div class="legend">
+        <div class="legend-item">
+          <span class="dot low"></span>
+          <div>
+            <strong>Low</strong>
+            <p>&lt; 10%. Normal background risk.</p>
+          </div>
+        </div>
+
+        <div class="legend-item">
+          <span class="dot elevated"></span>
+          <div>
+            <strong>Elevated</strong>
+            <p>10–25%. Risk threshold exceeded; monitor operations.</p>
+          </div>
+        </div>
+
+        <div class="legend-item">
+          <span class="dot high"></span>
+          <div>
+            <strong>High</strong>
+            <p>&gt; 25%. Strong risk signal; review schedules.</p>
+          </div>
+        </div>
+
+        <div class="legend-item">
+          <span class="dot clim"></span>
+          <div>
+            <strong>Climatology</strong>
+            <p>Historical city/day-of-year estimate when forecast data is unavailable.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="controls">
+      <button id="dailyBtn" class="active">Daily calendars</button>
+      <button id="monthlyBtn">Monthly summary</button>
+    </section>
+
+    <section id="dailyView" class="view"></section>
+
+    <section id="monthlyView" class="view hidden">
+      <div class="table-card">
+        <h2>Monthly summary</h2>
+        <div id="monthlyTable"></div>
+      </div>
+    </section>
+
+    <section class="note">
+      <h2>What the probability means</h2>
+      <p>
+        The value shown for each city-date is the estimated probability that the day will
+        meet the project’s weather-based maritime delay-risk definition. It does not mean
+        a confirmed ship delay or port closure.
+      </p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

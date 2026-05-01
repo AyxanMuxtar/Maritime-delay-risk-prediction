@@ -460,6 +460,7 @@ def run_pipeline(
     mode:              str  = "incremental",
     since:             Optional[str] = None,
     dry_run:           bool = False,
+    fetch:             bool = True,
     skip_predict:      bool = False,
     skip_train:        bool = False,
     strict_freshness:  bool = False,
@@ -489,6 +490,7 @@ def run_pipeline(
         "start_time": start_time,
         "since":      since,
         "dry_run":    dry_run,
+        "fetch":      fetch,
     }
 
     log.info("╔" + "═" * 68 + "╗")
@@ -507,7 +509,7 @@ def run_pipeline(
         fetch_start, fetch_end = resolve_window(mode, conn, since=since)
         log.info("Fetch window: %s → %s", fetch_start, fetch_end)
 
-        if mode == "incremental":
+        if mode == "incremental" and fetch:
             current_max = get_latest_date_per_city(conn)
             log.info("Current max dates: %s", current_max)
             # If nothing to fetch, short-circuit
@@ -525,8 +527,18 @@ def run_pipeline(
                 return summary
 
         # ── STAGE 1: Ingest ───────────────────────────────────────────────────
-        ingest = stage_ingest(conn, fetch_start, fetch_end, data_dir, dry_run)
-        summary["rows_ingested"] = ingest["rows_fetched"]
+        if fetch:
+            ingest = stage_ingest(conn, fetch_start, fetch_end, data_dir, dry_run)
+            summary["rows_ingested"] = ingest.get("rows_fetched", 0)
+        else:
+            log.info("=== STAGE 1: Ingest skipped ===")
+            log.info("Skipping API fetch. Using existing raw CSV files from %s", data_dir)
+            ingest = {
+                "rows_fetched": 0,
+                "visibility_rows_fetched": 0,
+                "files_written": 0,
+            }
+            summary["rows_ingested"] = 0
 
         # ── STAGE 2: Load raw ─────────────────────────────────────────────────
         load = stage_load_raw(conn, data_dir,
@@ -645,6 +657,8 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="Override the incremental start date (YYYY-MM-DD)")
     p.add_argument("--dry-run", action="store_true",
                    help="Show what would run; make no changes")
+    p.add_argument("--no-fetch", action="store_true",
+               help="Skip API fetching and use existing files in data/raw")
     p.add_argument("--no-train", action="store_true",
                    help="Skip the training stage (also skips prediction)")
     p.add_argument("--no-predict", action="store_true",
@@ -661,6 +675,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         mode=args.mode,
         since=args.since,
         dry_run=args.dry_run,
+        fetch=not args.no_fetch,
         skip_predict=args.no_predict,
         skip_train=args.no_train,
         strict_freshness=args.strict_freshness,

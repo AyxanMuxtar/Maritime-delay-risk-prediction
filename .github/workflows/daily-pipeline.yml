@@ -1,9 +1,9 @@
-name: Monthly pipeline
+name: Daily pipeline
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHAT THIS DOES
 # ─────────────────────────────────────────────────────────────────────────────
-# Runs src/pipeline.py on the 1st of every month at 06:00 UTC.
+# Runs src/pipeline.py every day at 06:00 UTC.
 # Also runnable manually from the "Actions" tab (workflow_dispatch).
 #
 # Flow:
@@ -20,11 +20,10 @@ name: Monthly pipeline
 
 on:
   schedule:
-    # Run on the 1st of every month at 06:00 UTC
+    # Run every day at 06:00 UTC
     # Cron syntax: minute hour day-of-month month day-of-week
-    - cron: '0 6 1 * *'
+    - cron: '0 6 * * *'
 
-  # Allow manual runs from the Actions tab
   workflow_dispatch:
     inputs:
       mode:
@@ -128,7 +127,7 @@ jobs:
             if git diff --staged --quiet; then
               echo "No new predictions to commit"
             else
-              git commit -m "Monthly predictions — $(date +%Y-%m-%d) [skip ci]"
+              git commit -m "Daily predictions — $(date +%Y-%m-%d) [skip ci]"
               git push
             fi
           fi

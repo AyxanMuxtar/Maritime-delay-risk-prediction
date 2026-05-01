@@ -461,6 +461,27 @@ def _all_dates_in_month(target_month: str) -> list[date]:
     return [date(y, m, d) for d in range(1, n_days + 1)]
 
 
+def _rolling_dates(start_date: Optional[date] = None, days_ahead: int = 30) -> list[date]:
+    """
+    Return a rolling inclusive date window.
+
+    Example:
+        start_date = May 1, days_ahead = 30
+        returns May 1 → May 31 inclusive
+
+        start_date = May 2, days_ahead = 30
+        returns May 2 → June 1 inclusive
+    """
+    if start_date is None:
+        start_date = date.today()
+
+    end_date = start_date + timedelta(days=days_ahead)
+    return [
+        start_date + timedelta(days=i)
+        for i in range((end_date - start_date).days + 1)
+    ]
+
+
 def _build_forecast_features_with_lookback(
     conn,
     forecast_df: pd.DataFrame,
@@ -622,10 +643,14 @@ def predict_next_month(
         model_object = model
         model_feature_cols = []
 
-    # Plan the horizon
-    target_month = _resolve_target_month(conn, target_month)
-    target_dates = _all_dates_in_month(target_month)
+    # Plan the rolling forecast window
     today = date.today()
+    target_dates = _rolling_dates(start_date=today, days_ahead=30)
+
+    window_start = target_dates[0]
+    window_end = target_dates[-1]
+    target_window = f"{window_start.isoformat()}_{window_end.isoformat()}"
+
     short_horizon_end = today + timedelta(days=forecast_horizon)
 
     # Try to fetch short-horizon forecast features (best-effort)
@@ -703,15 +728,20 @@ def predict_next_month(
 
     daily_df = pd.DataFrame(rows).sort_values(["city", "date"]).reset_index(drop=True)
 
-    # Monthly summary
-    monthly_df = _summarise_monthly(
-        daily_df, target_month, threshold, n_monte_carlo, HIGH_RISK_MONTH_THRESHOLD,
+    # Rolling-window summary
+    monthly_df = _summarise_window(
+        daily_df=daily_df,
+        window_start=window_start,
+        window_end=window_end,
+        threshold=threshold,
+        n_monte_carlo=n_monte_carlo,
+        high_risk_month_threshold=HIGH_RISK_MONTH_THRESHOLD,
     )
 
     logger.info(
-        "  %d daily predictions for %s across %d cities "
+        "  %d daily predictions for %s → %s across %d cities "
         "(short_horizon=%d, climatology=%d)",
-        len(daily_df), target_month, len(cities),
+        len(daily_df), window_start, window_end, len(cities),
         int((daily_df["source"] == "short_horizon").sum()),
         int((daily_df["source"] == "climatology").sum()),
     )
@@ -814,38 +844,102 @@ def _summarise_monthly(
         })
     return pd.DataFrame(rows).sort_values("city").reset_index(drop=True)
 
+def _summarise_window(
+    daily_df:                  pd.DataFrame,
+    window_start:              date,
+    window_end:                date,
+    threshold:                 float,
+    n_monte_carlo:             int,
+    high_risk_month_threshold: int,
+) -> pd.DataFrame:
+    """
+    Per-city summary derived from the rolling daily prediction window.
+
+    risk_days_predicted          = count of days where prediction == 1
+    high_risk_window_probability = P(sum of Bernoulli(p_i) >= threshold)
+                                   estimated by Monte Carlo over the
+                                   per-day probabilities.
+    """
+    rng = np.random.default_rng(seed=42)
+    rows = []
+
+    for city, sub in daily_df.groupby("city"):
+        probs = sub["probability"].values
+        risk_days_pred = int(sub["prediction"].sum())
+
+        samples = rng.binomial(1, probs[None, :], size=(n_monte_carlo, len(probs)))
+        sums = samples.sum(axis=1)
+        p_high_risk = float((sums >= high_risk_month_threshold).mean())
+
+        n_short = int((sub["source"] == "short_horizon").sum())
+        n_clim = int((sub["source"] == "climatology").sum())
+
+        rows.append({
+            "city":                         city,
+            "window_start":                 window_start.isoformat(),
+            "window_end":                   window_end.isoformat(),
+            "risk_days_predicted":          risk_days_pred,
+            "high_risk_window_probability": round(p_high_risk, 4),
+            "n_short_horizon_days":         n_short,
+            "n_climatology_days":           n_clim,
+        })
+
+    return pd.DataFrame(rows).sort_values("city").reset_index(drop=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. Save predictions
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_predictions(
-    daily_df:     pd.DataFrame,
-    monthly_df:   pd.DataFrame,
-    target_month: Optional[str]   = None,
-    out_dir:      str | Path      = "predictions",
+    daily_df:   pd.DataFrame,
+    monthly_df: pd.DataFrame,
+    target_month: Optional[str] = None,  # kept for compatibility with pipeline.py
+    out_dir:    str | Path = "predictions",
 ) -> tuple[Path, Path]:
     """
-    Write predictions to:
-        <out_dir>/<target_month>/daily.csv
-        <out_dir>/<target_month>/monthly.csv
+    Write latest rolling-window predictions to:
 
-    Returns (daily_path, monthly_path).
+        <out_dir>/latest/daily.csv
+        <out_dir>/latest/monthly.csv
+        <out_dir>/latest.json
+
+    The name monthly.csv is kept for website compatibility, but its contents
+    now summarize the rolling forecast window, not a calendar month.
     """
-    if target_month is None:
-        if "target_month" in monthly_df.columns and len(monthly_df) > 0:
-            target_month = str(monthly_df["target_month"].iloc[0])
-        else:
-            raise ValueError("target_month not provided and not derivable")
+    out_dir = Path(out_dir)
+    latest_dir = out_dir / "latest"
+    latest_dir.mkdir(parents=True, exist_ok=True)
 
-    out_dir = Path(out_dir) / target_month
-    out_dir.mkdir(parents=True, exist_ok=True)
+    daily_path = latest_dir / "daily.csv"
+    monthly_path = latest_dir / "monthly.csv"
+    latest_json_path = out_dir / "latest.json"
 
-    daily_path   = out_dir / "daily.csv"
-    monthly_path = out_dir / "monthly.csv"
-    daily_df.to_csv(daily_path,   index=False)
+    daily_df.to_csv(daily_path, index=False)
     monthly_df.to_csv(monthly_path, index=False)
 
+    if len(daily_df) > 0:
+        window_start = str(daily_df["date"].min())
+        window_end = str(daily_df["date"].max())
+    else:
+        window_start = ""
+        window_end = ""
+
+    metadata = {
+        "window_start": window_start,
+        "window_end": window_end,
+        "days": int(daily_df["date"].nunique()) if "date" in daily_df.columns else 0,
+        "daily_path": "latest/daily.csv",
+        "monthly_path": "latest/monthly.csv",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    import json
+    with latest_json_path.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
     logger.info("  Saved daily predictions   → %s", daily_path)
-    logger.info("  Saved monthly summary     → %s", monthly_path)
+    logger.info("  Saved window summary      → %s", monthly_path)
+    logger.info("  Saved latest metadata     → %s", latest_json_path)
+
     return daily_path, monthly_path

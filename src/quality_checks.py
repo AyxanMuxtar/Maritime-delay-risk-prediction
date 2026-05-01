@@ -236,7 +236,7 @@ def check_value_ranges(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. Feature completeness (WARN on failure)
+# 5. Analytics column completeness (WARN on failure)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_feature_completeness(
@@ -244,8 +244,10 @@ def check_feature_completeness(
     table: str = "analytics.daily_enriched",
 ) -> dict:
     """
-    After analytics: critical engineered features must be present and non-null.
-    Lag columns are allowed to be NaN on the first few rows per city.
+    After analytics: critical engineered columns must be present and non-null.
+
+    Note: this is a data-quality check for the analytics table, not the final
+    selected model feature list. The model may use fewer selected features.
     """
     required = [
         "temperature_2m_mean", "wind_speed_10m_max", "precipitation_sum",
@@ -276,7 +278,7 @@ def check_feature_completeness(
             "severity":   WARN,
             "stage":      "analytics",
             "details":    {"missing_columns": missing},
-            "message":    f"{len(missing)} required features missing: {missing}",
+            "message":    f"{len(missing)} required analytics columns missing: {missing}",
         }
 
     # Check nullness (excluding lag columns which have expected leading NaN)
@@ -296,9 +298,9 @@ def check_feature_completeness(
         "stage":      "analytics",
         "details":    {"required": required,
                        "null_offenders": nullable_offenders},
-        "message":    f"All {len(required)} required features present and non-null"
+        "message":    f"All {len(required)} required analytics columns present and non-null"
                       if passed else
-                      f"Nulls in required features: {nullable_offenders}",
+                      f"Nulls in required analytics columns: {nullable_offenders}",
     }
 
 
@@ -363,11 +365,13 @@ def check_freshness_monthly(
 
 def check_predictions_completeness(daily_df, expected_cities: list[str]) -> dict:
     """
-    Verify the predictions DataFrame:
+    Verify the rolling-window predictions DataFrame:
       - Covers every expected city
-      - Covers every day of its target month (no gaps)
+      - Covers the same continuous date window for every city
       - Has valid source flags (only 'short_horizon' or 'climatology')
       - Has probabilities in [0, 1]
+
+    This intentionally checks a rolling window, not a single calendar month.
     """
     import pandas as pd
 
@@ -382,40 +386,97 @@ def check_predictions_completeness(daily_df, expected_cities: list[str]) -> dict
             "message":    "Predictions DataFrame is empty",
         }
 
+    required_cols = {"city", "date", "probability", "source"}
+    missing_cols = required_cols - set(daily_df.columns)
+    if missing_cols:
+        return {
+            "check_name": "predictions_completeness",
+            "status":     "WARN",
+            "severity":   WARN,
+            "stage":      "predict",
+            "details":    {"missing_columns": sorted(missing_cols)},
+            "message":    f"Prediction file missing required columns: {sorted(missing_cols)}",
+        }
+
+    df = daily_df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["probability"] = pd.to_numeric(df["probability"], errors="coerce")
+
+    if df["date"].isna().any():
+        issues.append(f"{int(df['date'].isna().sum())} invalid date values")
+
+    valid_date_df = df[df["date"].notna()].copy()
+
     # City coverage
-    cities_in = set(daily_df["city"].unique())
+    cities_in = set(df["city"].dropna().unique())
     cities_expected = set(expected_cities)
     if cities_in != cities_expected:
         missing = cities_expected - cities_in
-        extra   = cities_in - cities_expected
+        extra = cities_in - cities_expected
         if missing:
             issues.append(f"missing cities: {sorted(missing)}")
         if extra:
             issues.append(f"unexpected cities: {sorted(extra)}")
 
-    # Day coverage per city
-    dates = pd.to_datetime(daily_df["date"])
-    target_month = dates.dt.strftime("%Y-%m").iloc[0]
-    expected_days = pd.Period(target_month).days_in_month
-    by_city = daily_df.groupby("city").size()
-    bad_cities = by_city[by_city != expected_days].to_dict()
-    if bad_cities:
-        issues.append(
-            f"day count mismatch (expected {expected_days}): {bad_cities}"
-        )
+    if len(valid_date_df) == 0:
+        issues.append("no valid prediction dates")
+        window_start = None
+        window_end = None
+        expected_days = 0
+        bad_cities = {}
+    else:
+        window_start = valid_date_df["date"].min().normalize()
+        window_end = valid_date_df["date"].max().normalize()
+        expected_dates = pd.date_range(window_start, window_end, freq="D")
+        expected_days = len(expected_dates)
+        expected_date_set = set(expected_dates)
+
+        # Each city must cover the full rolling window exactly once per date.
+        bad_cities = {}
+        duplicate_rows = 0
+
+        for city in sorted(cities_expected):
+            sub = valid_date_df[valid_date_df["city"] == city]
+            city_dates = pd.to_datetime(sub["date"]).dt.normalize()
+            city_date_set = set(city_dates)
+
+            missing_dates = expected_date_set - city_date_set
+            extra_dates = city_date_set - expected_date_set
+            duplicated = int(city_dates.duplicated().sum())
+            duplicate_rows += duplicated
+
+            if missing_dates or extra_dates or duplicated:
+                bad_cities[city] = {
+                    "rows": int(len(sub)),
+                    "unique_dates": int(city_dates.nunique()),
+                    "missing_dates": [d.strftime("%Y-%m-%d") for d in sorted(missing_dates)[:10]],
+                    "extra_dates": [d.strftime("%Y-%m-%d") for d in sorted(extra_dates)[:10]],
+                    "duplicate_date_rows": duplicated,
+                }
+
+        if bad_cities:
+            issues.append(
+                f"rolling-window date coverage mismatch "
+                f"(expected {expected_days} days per city): {bad_cities}"
+            )
+
+        if duplicate_rows:
+            issues.append(f"{duplicate_rows} duplicate city-date prediction rows")
 
     # Source flag validity
     valid_sources = {"short_horizon", "climatology"}
-    bad_sources = set(daily_df["source"].unique()) - valid_sources
+    bad_sources = set(df["source"].dropna().unique()) - valid_sources
     if bad_sources:
         issues.append(f"invalid source flags: {bad_sources}")
 
     # Probability range
-    bad_probs = daily_df[
-        (daily_df["probability"] < 0) | (daily_df["probability"] > 1)
+    bad_probs = df[
+        df["probability"].isna()
+        | (df["probability"] < 0)
+        | (df["probability"] > 1)
     ]
     if len(bad_probs) > 0:
-        issues.append(f"{len(bad_probs)} probabilities outside [0, 1]")
+        issues.append(f"{len(bad_probs)} probabilities missing/outside [0, 1]")
 
     passed = len(issues) == 0
     return {
@@ -424,17 +485,18 @@ def check_predictions_completeness(daily_df, expected_cities: list[str]) -> dict
         "severity":   WARN,
         "stage":      "predict",
         "details":    {
-            "rows":           len(daily_df),
-            "target_month":   target_month,
-            "expected_days":  expected_days,
+            "rows":           int(len(df)),
+            "window_start":   window_start.strftime("%Y-%m-%d") if window_start is not None else None,
+            "window_end":     window_end.strftime("%Y-%m-%d") if window_end is not None else None,
+            "expected_days":  int(expected_days),
             "cities":         sorted(cities_in),
-            "by_source":      daily_df["source"].value_counts().to_dict(),
+            "by_source":      df["source"].value_counts().to_dict(),
+            "coverage_issues": bad_cities,
         },
-        "message":    "All predictions cover their target month cleanly"
+        "message":    "All predictions cover the rolling window cleanly"
                       if passed else
                       f"Issues: {'; '.join(issues)}",
     }
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 7. Batch runner & pretty-print

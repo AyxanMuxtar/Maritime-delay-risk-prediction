@@ -21,6 +21,19 @@ monthlyBtn.addEventListener("click", () => {
   dailyView.classList.add("hidden");
 });
 
+const CITY_COUNTRIES = {
+  Baku: "Azerbaijan",
+  Anzali: "Iran",
+  Aktau: "Kazakhstan",
+  Makhachkala: "Russia",
+  Turkmenbashi: "Turkmenistan",
+};
+
+function cityLabel(city) {
+  const country = CITY_COUNTRIES[city];
+  return country ? `${city}, ${country}` : city;
+}
+
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   const headers = lines[0].split(",").map(h => h.trim());
@@ -61,6 +74,17 @@ function probability(row) {
   return Number(row.probability ?? row.prob ?? row.p ?? 0);
 }
 
+function summaryProbability(row) {
+  return Number(
+    row.high_risk_window_probability ??
+    row.high_risk_month_probability ??
+    row.probability ??
+    row.prob ??
+    row.p ??
+    0
+  );
+}
+
 function getRiskClass(p) {
   if (p >= 0.25) return "high";
   if (p >= 0.10) return "elevated";
@@ -81,30 +105,76 @@ function sourceLabel(row) {
   return row.source || "model";
 }
 
-function monthName(monthStr) {
-  const [year, month] = monthStr.split("-").map(Number);
-  const date = new Date(year, month - 1, 1);
+function toISODate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
 
-  return date.toLocaleString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
+  return `${year}-${month}-${day}`;
 }
 
-function buildCalendar(city, rows, targetMonth) {
-  const [year, month] = targetMonth.split("-").map(Number);
-  const firstDate = new Date(year, month - 1, 1);
-  const lastDate = new Date(year, month, 0);
-  const daysInMonth = lastDate.getDate();
+function parseISODateLocal(value) {
+  return new Date(`${value}T00:00:00`);
+}
 
-  const firstDayIndex = (firstDate.getDay() + 6) % 7; // Monday first
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
-  const rowByDay = new Map();
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatWindow(start, end) {
+  const dateOpts = { month: "short", day: "numeric" };
+
+  const startText = start.toLocaleDateString("en-US", dateOpts);
+  const endText = end.toLocaleDateString("en-US", dateOpts);
+  const yearText = end.getFullYear();
+
+  return `
+    <span class="window-dates">${startText} → ${endText}</span>
+    <span class="window-year">${yearText}</span>
+  `;
+}
+
+function formatCalendarMonths(start, end) {
+  const sameMonth =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth();
+
+  const startMonth = start.toLocaleString("en-US", { month: "long" });
+  const endMonth = end.toLocaleString("en-US", { month: "long" });
+
+  const startYear = start.getFullYear();
+  const endYear = end.getFullYear();
+
+  if (sameMonth) {
+    return `${startMonth} ${startYear}`;
+  }
+
+  if (startYear === endYear) {
+    return `${startMonth}–${endMonth} ${startYear}`;
+  }
+
+  return `${startMonth} ${startYear} – ${endMonth} ${endYear}`;
+}
+
+function formatCellDay(date) {
+  return date.getDate();
+}
+
+function buildCalendar(city, rows, startDate, endDate) {
+  const firstDayIndex = (startDate.getDay() + 6) % 7; // Monday first
+
+  const rowByDate = new Map();
 
   rows.forEach(row => {
-    const date = new Date(row.date);
-    const day = date.getDate();
-    rowByDay.set(day, row);
+    rowByDate.set(row.date, row);
   });
 
   const card = document.createElement("article");
@@ -118,7 +188,11 @@ function buildCalendar(city, rows, targetMonth) {
 
   card.innerHTML = `
     <div class="city-header">
-      <h2>${city}</h2>
+      <div class="city-title-row">
+        <h2 class="city-name">${cityLabel(city)}</h2>
+        <h2 class="city-months">${formatCalendarMonths(startDate, endDate)}</h2>
+      </div>
+
       <div class="city-stats">
         <strong>${highDays}</strong> high-risk ·
         <strong>${elevatedDays}</strong> elevated ·
@@ -143,16 +217,20 @@ function buildCalendar(city, rows, targetMonth) {
     calendar.appendChild(empty);
   }
 
-  for (let day = 1; day <= daysInMonth; day++) {
-    const row = rowByDay.get(day);
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    const iso = toISODate(d);
+    const row = rowByDate.get(iso);
     const cell = document.createElement("div");
+    const displayDay = formatCellDay(d);
 
     if (!row) {
       cell.className = "day";
       cell.innerHTML = `
-        <span class="day-number">${day}</span>
-        <span class="prob">—</span>
-        <span class="source">no data</span>
+        <span class="day-number">${displayDay}</span>
+        <div class="day-main">
+          <span class="prob">—</span>
+          <span class="source">no data</span>
+        </div>
       `;
     } else {
       const p = probability(row);
@@ -163,9 +241,11 @@ function buildCalendar(city, rows, targetMonth) {
       cell.title = `${city} ${row.date}: ${formatPercent(p)} risk`;
 
       cell.innerHTML = `
-        <span class="day-number">${day}</span>
-        <span class="prob">${formatPercent(p)}</span>
-        <span class="source">${sourceLabel(row)}</span>
+        <span class="day-number">${displayDay}</span>
+        <div class="day-main">
+          <span class="prob">${formatPercent(p)}</span>
+          <span class="source">${sourceLabel(row)}</span>
+        </div>
       `;
     }
 
@@ -176,7 +256,7 @@ function buildCalendar(city, rows, targetMonth) {
   return card;
 }
 
-function renderDaily(rows, targetMonth) {
+function renderDaily(rows, startDate, endDate) {
   dailyView.innerHTML = "";
 
   if (!rows.length || !("date" in rows[0])) {
@@ -191,20 +271,40 @@ function renderDaily(rows, targetMonth) {
     return;
   }
 
-  const cities = [...new Set(rows.map(r => r.city))].sort();
+  const startISO = toISODate(startDate);
+  const endISO = toISODate(endDate);
+
+  const windowRows = rows.filter(row => {
+    return row.date >= startISO && row.date <= endISO;
+  });
+
+  if (!windowRows.length) {
+    dailyView.innerHTML = `
+      <div class="city-card">
+        <h2>No rows found for this forecast window</h2>
+        <p class="subtitle">
+          The daily prediction file loaded, but it does not contain dates from
+          ${startISO} to ${endISO}.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  const cities = [...new Set(windowRows.map(r => r.city))].sort();
 
   cities.forEach(city => {
-    const cityRows = rows
+    const cityRows = windowRows
       .filter(r => r.city === city)
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    dailyView.appendChild(buildCalendar(city, cityRows, targetMonth));
+    dailyView.appendChild(buildCalendar(city, cityRows, startDate, endDate));
   });
 }
 
 function renderMonthly(rows) {
   if (!rows.length) {
-    monthlyTable.innerHTML = "<p>No monthly summary available.</p>";
+    monthlyTable.innerHTML = "<p>No window summary available.</p>";
     return;
   }
 
@@ -214,20 +314,31 @@ function renderMonthly(rows) {
     <thead>
       <tr>
         <th>City</th>
-        <th>Month</th>
+        <th>Window</th>
         <th>Probability</th>
-        <th>Prediction</th>
+        <th>Risk days</th>
+        <th>Forecast days</th>
+        <th>Climatology days</th>
       </tr>
     </thead>
     <tbody>
-      ${rows.map(row => `
-        <tr>
-          <td>${row.city}</td>
-          <td>${row.target_month || row.month || "—"}</td>
-          <td>${formatPercent(probability(row))}</td>
-          <td>${Number(row.prediction) === 1 ? "Risk" : "No risk"}</td>
-        </tr>
-      `).join("")}
+      ${rows.map(row => {
+        const windowLabel =
+          row.window_start && row.window_end
+            ? `${row.window_start} → ${row.window_end}`
+            : row.target_month || row.month || "—";
+
+        return `
+          <tr>
+            <td>${row.city}</td>
+            <td>${windowLabel}</td>
+            <td>${formatPercent(summaryProbability(row))}</td>
+            <td>${row.risk_days_predicted ?? "—"}</td>
+            <td>${row.n_short_horizon_days ?? "—"}</td>
+            <td>${row.n_climatology_days ?? "—"}</td>
+          </tr>
+        `;
+      }).join("")}
     </tbody>
   `;
 
@@ -238,21 +349,38 @@ function renderMonthly(rows) {
 async function init() {
   try {
     const latest = await loadJSON(`${PREDICTIONS_BASE}/latest.json`);
-    const targetMonth = latest.month || latest.target_month;
 
-    document.getElementById("targetMonth").textContent = monthName(targetMonth);
+    let startDate;
+    let endDate;
 
-    const dailyText = await loadText(`${PREDICTIONS_BASE}/${targetMonth}/daily.csv`);
-    const monthlyText = await loadText(`${PREDICTIONS_BASE}/${targetMonth}/monthly.csv`);
+    if (latest.window_start && latest.window_end) {
+      startDate = parseISODateLocal(latest.window_start);
+      endDate = parseISODateLocal(latest.window_end);
+    } else {
+      startDate = startOfToday();
+      endDate = addDays(startDate, 30);
+    }
+
+    document.getElementById("targetMonth").innerHTML = formatWindow(startDate, endDate);
+
+    const dailyText = await loadText(`${PREDICTIONS_BASE}/latest/daily.csv`);
+    const monthlyText = await loadText(`${PREDICTIONS_BASE}/latest/monthly.csv`);
 
     const dailyRows = parseCSV(dailyText);
     const monthlyRows = parseCSV(monthlyText);
 
-    renderDaily(dailyRows, targetMonth);
+    renderDaily(dailyRows, startDate, endDate);
     renderMonthly(monthlyRows);
 
-    const cities = new Set(dailyRows.map(r => r.city));
-    const highRiskDays = dailyRows.filter(r => probability(r) >= 0.25).length;
+    const startISO = toISODate(startDate);
+    const endISO = toISODate(endDate);
+
+    const visibleRows = dailyRows.filter(row => {
+      return row.date >= startISO && row.date <= endISO;
+    });
+
+    const cities = new Set(visibleRows.map(r => r.city));
+    const highRiskDays = visibleRows.filter(r => probability(r) >= 0.25).length;
 
     document.getElementById("cityCount").textContent = cities.size;
     document.getElementById("highRiskDays").textContent = highRiskDays;
@@ -263,8 +391,9 @@ async function init() {
       <div class="city-card">
         <h2>Could not load prediction files</h2>
         <p class="subtitle">
-          Make sure <code>predictions/latest.json</code> and
-          <code>predictions/YYYY-MM/daily.csv</code> exist.
+          Make sure <code>predictions/latest.json</code>,
+          <code>predictions/latest/daily.csv</code>, and
+          <code>predictions/latest/monthly.csv</code> exist.
         </p>
         <p class="subtitle">${err.message}</p>
       </div>

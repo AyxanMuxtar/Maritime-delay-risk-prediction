@@ -20,7 +20,7 @@
 
       <section class="summary-grid">
         <div class="summary-card">
-          <span class="label">Target month</span>
+          <span class="label">Forecast window</span>
           <strong id="targetMonth">Loading...</strong>
         </div>
         <div class="summary-card">
@@ -50,10 +50,12 @@
           </div>
         </div>
 
+    
+
         <div class="legend-item">
           <span class="dot elevated"></span>
           <div>
-            <strong>Elevated</strong>
+            <strong>Medium</strong>
             <p>10–25%. Risk threshold exceeded; monitor operations.</p>
           </div>
         </div>
@@ -65,27 +67,32 @@
             <p>&gt; 25%. Strong risk signal; review schedules.</p>
           </div>
         </div>
-
-        <div class="legend-item">
-          <span class="dot clim"></span>
-          <div>
-            <strong>Climatology</strong>
-            <p>Historical city/day-of-year estimate when forecast data is unavailable.</p>
-          </div>
-        </div>
       </div>
+
+      <div class="source-legend">
+        <span class="source-key">
+          <strong class="forecast-text">Purple %</strong>
+          forecast-based estimate
+        </span>
+
+        <span class="source-key">
+          <strong class="climatology-text">White %</strong>
+          Climatology estimate
+        </span>
+      </div>
+
     </section>
 
     <section class="controls">
       <button id="dailyBtn" class="active">Daily calendars</button>
-      <button id="monthlyBtn">Monthly summary</button>
+      <button id="monthlyBtn">Window summary</button>
     </section>
 
     <section id="dailyView" class="view"></section>
 
     <section id="monthlyView" class="view hidden">
       <div class="table-card">
-        <h2>Monthly summary</h2>
+        <h2>Window summary</h2>
         <div id="monthlyTable"></div>
       </div>
     </section>

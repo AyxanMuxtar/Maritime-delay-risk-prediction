@@ -403,7 +403,7 @@ def stage_train(conn, model_path: Path, climatology_path: Path,
 def stage_predict(conn, model_path: Path, climatology_path: Path,
                   preds_dir: Path, dry_run: bool = False) -> dict:
     log = logging.getLogger("stage.predict")
-    log.info("=== STAGE 6: Predict next month (daily granularity) ===")
+    log.info("=== STAGE 6: Predict rolling 30-day window ===")
 
     if dry_run:
         return {"target_month": None, "rows": 0}
@@ -413,7 +413,15 @@ def stage_predict(conn, model_path: Path, climatology_path: Path,
         model_path=model_path,
         climatology_path=climatology_path,
     )
-    target = str(monthly_df["target_month"].iloc[0]) if len(monthly_df) else None
+    
+    if len(monthly_df) and "window_start" in monthly_df.columns and "window_end" in monthly_df.columns:
+        target = f"{monthly_df['window_start'].iloc[0]}_{monthly_df['window_end'].iloc[0]}"
+    elif len(monthly_df) and "target_month" in monthly_df.columns:
+        target = str(monthly_df["target_month"].iloc[0])
+    else:
+        target = None
+
+
     daily_path, monthly_path = save_predictions(
         daily_df, monthly_df, target_month=target, out_dir=preds_dir,
     )
@@ -424,10 +432,11 @@ def stage_predict(conn, model_path: Path, climatology_path: Path,
         "  %d daily rows for %s (short_horizon=%d, climatology=%d)",
         len(daily_df), target, n_short, n_clim,
     )
-    log.info("  Monthly summary: %d cities", len(monthly_df))
+    log.info("  Window summary: %d cities", len(monthly_df))
 
     return {
-        "target_month":              target,
+        "target_month":              target,  # kept for backward compatibility
+        "target_window":             target,
         "daily_rows":                len(daily_df),
         "monthly_rows":              len(monthly_df),
         "n_short_horizon_days":      n_short,
@@ -512,19 +521,16 @@ def run_pipeline(
         if mode == "incremental" and fetch:
             current_max = get_latest_date_per_city(conn)
             log.info("Current max dates: %s", current_max)
-            # If nothing to fetch, short-circuit
-            # Compare just the date portion (current_max values are 'YYYY-MM-DD' after fix)
+            # If historical data is already current, do NOT return early.
+            # For the rolling website, predictions/latest must still be refreshed
+            # every day so the visible window advances by one day.
             if all(d is not None and d[:10] >= fetch_end for d in current_max.values()):
-                log.info("✅ Data already up to date — no fetch needed")
-                summary["status"] = "UP_TO_DATE"
-                summary["end_time"]     = datetime.now()
-                summary["duration_sec"] = (summary["end_time"] - start_time).total_seconds()
-                summary["rows_ingested"] = 0
-                summary["rows_cleaned"]  = 0
-                summary["rows_analytics"] = 0
-                summary["warnings_count"] = 0
-                _record_run(conn, summary)
-                return summary
+                log.info(
+                    "✅ Historical data already up to date — "
+                    "skipping API fetch but refreshing analytics/predictions"
+                )
+                fetch = False
+                summary["fetch"] = False
 
         # ── STAGE 1: Ingest ───────────────────────────────────────────────────
         if fetch:
@@ -585,7 +591,7 @@ def run_pipeline(
             pred = stage_predict(
                 conn, model_path, climatology_path, preds_dir, dry_run,
             )
-            summary["predictions_for"]        = pred.get("target_month", "")
+            summary["predictions_for"]        = pred.get("target_window", pred.get("target_month", ""))
             summary["n_short_horizon_days"]   = pred.get("n_short_horizon_days", 0)
             summary["n_climatology_days"]     = pred.get("n_climatology_days", 0)
 

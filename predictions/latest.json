@@ -1,1 +1,8 @@
-{"month": "2026-05"}
+{
+  "window_start": "2026-05-01",
+  "window_end": "2026-05-31",
+  "days": 31,
+  "daily_path": "latest/daily.csv",
+  "monthly_path": "latest/monthly.csv",
+  "generated_at": "2026-05-01T23:17:26"
+}

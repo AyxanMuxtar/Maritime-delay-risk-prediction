@@ -633,22 +633,10 @@ def predict_next_month(
         cities, CITIES, today, short_horizon_end, FORECAST_VARIABLES,
     )
 
-    forecast_features_df = None
-
-    if forecast_df is not None and model_feature_cols:
-        forecast_features_df = _build_forecast_features_with_lookback(
-            conn=conn,
-            forecast_df=forecast_df,
-            feature_cols=model_feature_cols,
-            lookback_days=7,
-        )
-
     # Build forecast features using a 7-day lookback window.
     # This is required for lag/change/rolling features.
     forecast_features_df = None
 
-    model_feature_cols = getattr(model, "_feature_cols", None)
-
     if forecast_df is not None and model_feature_cols:
         forecast_features_df = _build_forecast_features_with_lookback(
             conn=conn,
@@ -656,6 +644,7 @@ def predict_next_month(
             feature_cols=model_feature_cols,
             lookback_days=7,
         )
+
 
     # Build the full prediction DataFrame
     rows = []

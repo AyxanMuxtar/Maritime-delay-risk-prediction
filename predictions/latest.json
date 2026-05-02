@@ -1,8 +1,8 @@
 {
-  "window_start": "2026-05-01",
-  "window_end": "2026-05-31",
+  "window_start": "2026-05-02",
+  "window_end": "2026-06-01",
   "days": 31,
   "daily_path": "latest/daily.csv",
   "monthly_path": "latest/monthly.csv",
-  "generated_at": "2026-05-01T23:17:26"
+  "generated_at": "2026-05-02T07:27:23"
 }

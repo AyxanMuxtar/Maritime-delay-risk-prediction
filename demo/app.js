@@ -1,25 +1,15 @@
 const PREDICTIONS_BASE = "../predictions";
 
 const dailyView = document.getElementById("dailyView");
-const monthlyView = document.getElementById("monthlyView");
-const monthlyTable = document.getElementById("monthlyTable");
+const targetMonth = document.getElementById("targetMonth");
+const cityCount = document.getElementById("cityCount");
+const highRiskDays = document.getElementById("highRiskDays");
+const lastUpdated = document.getElementById("lastUpdated");
+const riskModal = document.getElementById("riskModal");
+const riskModalContent = document.getElementById("riskModalContent");
+const riskModalClose = document.getElementById("riskModalClose");
 
-const dailyBtn = document.getElementById("dailyBtn");
-const monthlyBtn = document.getElementById("monthlyBtn");
-
-dailyBtn.addEventListener("click", () => {
-  dailyBtn.classList.add("active");
-  monthlyBtn.classList.remove("active");
-  dailyView.classList.remove("hidden");
-  monthlyView.classList.add("hidden");
-});
-
-monthlyBtn.addEventListener("click", () => {
-  monthlyBtn.classList.add("active");
-  dailyBtn.classList.remove("active");
-  monthlyView.classList.remove("hidden");
-  dailyView.classList.add("hidden");
-});
+let selectedDayCell = null;
 
 const CITY_COUNTRIES = {
   Baku: "Azerbaijan",
@@ -28,6 +18,41 @@ const CITY_COUNTRIES = {
   Makhachkala: "Russia",
   Turkmenbashi: "Turkmenistan",
 };
+
+// UI-only risk bands. These DO NOT change model calculations.
+// They only interpret the existing probability column from predictions/latest/daily.csv.
+const RISK_BANDS = [
+  {
+    max: 0.10,
+    className: "low",
+    label: "Low",
+    action: "Proceed normally",
+  },
+  {
+    max: 0.25,
+    className: "moderate",
+    label: "Moderate",
+    action: "Monitor conditions",
+  },
+  {
+    max: 0.50,
+    className: "high",
+    label: "High",
+    action: "Plan with caution",
+  },
+  {
+    max: 0.75,
+    className: "very-high",
+    label: "Very High",
+    action: "Manual review advised",
+  },
+  {
+    max: Infinity,
+    className: "severe",
+    label: "Severe",
+    action: "Avoid/postpone if possible",
+  },
+];
 
 function cityLabel(city) {
   const country = CITY_COUNTRIES[city];
@@ -52,47 +77,71 @@ function parseCSV(text) {
 
 async function loadText(path) {
   const response = await fetch(path, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load ${path}`);
-  }
-
+  if (!response.ok) throw new Error(`Failed to load ${path}`);
   return response.text();
 }
 
 async function loadJSON(path) {
   const response = await fetch(path, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error(`Failed to load ${path}`);
-  }
-
+  if (!response.ok) throw new Error(`Failed to load ${path}`);
   return response.json();
 }
 
-function probability(row) {
-  return Number(row.probability ?? row.prob ?? row.p ?? 0);
+function numberFrom(row, ...keys) {
+  for (const key of keys) {
+    const value = Number(row[key]);
+    if (!Number.isNaN(value)) return value;
+  }
+  return 0;
 }
 
-function summaryProbability(row) {
-  return Number(
-    row.high_risk_window_probability ??
-    row.high_risk_month_probability ??
-    row.probability ??
-    row.prob ??
-    row.p ??
-    0
-  );
+function probability(row) {
+  return numberFrom(row, "probability", "prob", "p");
+}
+
+function portWeatherProbability(row) {
+  return numberFrom(row, "port_weather_probability", "base_probability", "probability");
+}
+
+function offshoreSeaProbability(row) {
+  return numberFrom(row, "offshore_sea_probability");
+}
+
+function uncalibratedMaritimeProbability(row) {
+  return numberFrom(row, "uncalibrated_maritime_probability", "raw_probability", "probability");
+}
+
+function riskBand(p) {
+  const value = Number(p);
+  return RISK_BANDS.find(band => value < band.max) ?? RISK_BANDS[RISK_BANDS.length - 1];
 }
 
 function getRiskClass(p) {
-  if (p >= 0.25) return "high";
-  if (p >= 0.10) return "elevated";
-  return "low";
+  return riskBand(p).className;
+}
+
+function riskLabel(rowOrProbability) {
+  if (typeof rowOrProbability === "object") {
+    return rowOrProbability.risk_level || riskBand(probability(rowOrProbability)).label;
+  }
+  return riskBand(rowOrProbability).label;
+}
+
+function riskAction(rowOrProbability) {
+  if (typeof rowOrProbability === "object") {
+    return rowOrProbability.recommended_action || riskBand(probability(rowOrProbability)).action;
+  }
+  return riskBand(rowOrProbability).action;
 }
 
 function formatPercent(p) {
-  return `${Math.round(p * 100)}%`;
+  return `${Math.round(Number(p) * 100)}%`;
+}
+
+function formatNumber(value, digits = 2) {
+  const n = Number(value);
+  if (Number.isNaN(n)) return "—";
+  return n.toFixed(digits);
 }
 
 function sourceLabel(row) {
@@ -105,11 +154,40 @@ function sourceLabel(row) {
   return row.source || "model";
 }
 
+function offshoreSourceLabel(row) {
+  const src = (row.offshore_source || "").toLowerCase();
+
+  if (src.includes("marine")) return "marine forecast";
+  if (src.includes("wave_climatology")) return "wave climatology";
+  if (src.includes("climatology")) return "wave climatology";
+
+  return row.offshore_source || "not available";
+}
+
+function conditionLabel(row) {
+  const raw = row.main_drivers || row.risk_reason || row.reason || "";
+
+  if (!String(raw).trim()) {
+    return "No major risk condition";
+  }
+
+  return String(raw)
+    .replaceAll("_", " ")
+    .replace(/wind/gi, "Wind")
+    .replace(/gusts?/gi, "Gusts")
+    .replace(/precipitation/gi, "Precipitation")
+    .replace(/rain/gi, "Rain")
+    .replace(/visibility/gi, "Visibility")
+    .replace(/wave/gi, "Waves")
+    .replace(/offshore/gi, "Offshore")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function toISODate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-
   return `${year}-${month}-${day}`;
 }
 
@@ -131,7 +209,6 @@ function addDays(date, days) {
 
 function formatWindow(start, end) {
   const dateOpts = { month: "short", day: "numeric" };
-
   const startText = start.toLocaleDateString("en-US", dateOpts);
   const endText = end.toLocaleDateString("en-US", dateOpts);
   const yearText = end.getFullYear();
@@ -153,14 +230,8 @@ function formatCalendarMonths(start, end) {
   const startYear = start.getFullYear();
   const endYear = end.getFullYear();
 
-  if (sameMonth) {
-    return `${startMonth} ${startYear}`;
-  }
-
-  if (startYear === endYear) {
-    return `${startMonth}–${endMonth} ${startYear}`;
-  }
-
+  if (sameMonth) return `${startMonth} ${startYear}`;
+  if (startYear === endYear) return `${startMonth}–${endMonth} ${startYear}`;
   return `${startMonth} ${startYear} – ${endMonth} ${endYear}`;
 }
 
@@ -168,11 +239,116 @@ function formatCellDay(date) {
   return date.getDate();
 }
 
+function formatGeneratedAt(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function renderRiskModalContent(row) {
+  const finalRisk = probability(row);
+  const rawAdjusted = uncalibratedMaritimeProbability(row);
+  const portWeather = portWeatherProbability(row);
+  const offshore = offshoreSeaProbability(row);
+  const band = riskBand(finalRisk);
+  const wave = row.offshore_wave_height_m;
+  const rawDiff = Math.abs(rawAdjusted - finalRisk);
+  const showRawScore = rawDiff >= 0.01;
+
+  riskModalContent.innerHTML = `
+    <div class="detail-header">
+      <div>
+        <p class="eyebrow">Selected forecast day</p>
+        <h2 id="riskModalTitle">${cityLabel(row.city)} · ${row.date}</h2>
+      </div>
+      <div class="detail-score ${band.className}">
+        <span>${riskLabel(row)}</span>
+        <strong>${formatPercent(finalRisk)}</strong>
+      </div>
+    </div>
+
+    <section class="action-card ${band.className}">
+      <span class="label">Recommended action</span>
+      <strong>${riskAction(row)}</strong>
+    </section>
+
+    <div class="risk-components ${showRawScore ? "has-raw-score" : ""}">
+      <div class="component-card primary-card">
+        <span class="label">Final maritime risk</span>
+        <strong>${formatPercent(finalRisk)}</strong>
+        <p>${riskLabel(row)}</p>
+      </div>
+
+      <div class="component-card">
+        <span class="label">Port-weather risk</span>
+        <strong>${formatPercent(portWeather)}</strong>
+        <p>${sourceLabel(row)}</p>
+      </div>
+
+      <div class="component-card">
+        <span class="label">Offshore sea-state risk</span>
+        <strong>${formatPercent(offshore)}</strong>
+        <p>${offshoreSourceLabel(row)}</p>
+      </div>
+
+      <div class="component-card">
+        <span class="label">Wave estimate</span>
+        <strong>${formatNumber(wave)} m</strong>
+        <p>${row.offshore_driver || "No major offshore condition"}</p>
+      </div>
+
+      ${showRawScore ? `
+        <div class="component-card muted-card">
+          <span class="label">Raw adjusted score</span>
+          <strong>${formatPercent(rawAdjusted)}</strong>
+          <p>before calibration</p>
+        </div>
+      ` : ""}
+    </div>
+
+    <p class="detail-reason">
+      <strong>Key conditions:</strong> ${conditionLabel(row)}.
+    </p>
+  `;
+}
+
+function openRiskModal(row, cell = null) {
+  renderRiskModalContent(row);
+
+  if (selectedDayCell) {
+    selectedDayCell.classList.remove("selected");
+  }
+
+  selectedDayCell = cell;
+  if (selectedDayCell) {
+    selectedDayCell.classList.add("selected");
+  }
+
+  riskModal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  riskModalClose.focus();
+}
+
+function closeRiskModal() {
+  riskModal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+
+  if (selectedDayCell) {
+    selectedDayCell.classList.remove("selected");
+    selectedDayCell = null;
+  }
+}
+
 function buildCalendar(city, rows, startDate, endDate) {
-  const firstDayIndex = (startDate.getDay() + 6) % 7; // Monday first
+  const firstDayIndex = (startDate.getDay() + 6) % 7;
 
   const rowByDate = new Map();
-
   rows.forEach(row => {
     rowByDate.set(row.date, row);
   });
@@ -181,7 +357,7 @@ function buildCalendar(city, rows, startDate, endDate) {
   card.className = "city-card";
 
   const highDays = rows.filter(r => probability(r) >= 0.25).length;
-  const elevatedDays = rows.filter(r => probability(r) >= 0.10 && probability(r) < 0.25).length;
+  const veryHighDays = rows.filter(r => probability(r) >= 0.50).length;
   const avgProb = rows.length
     ? rows.reduce((sum, r) => sum + probability(r), 0) / rows.length
     : 0;
@@ -194,8 +370,8 @@ function buildCalendar(city, rows, startDate, endDate) {
       </div>
 
       <div class="city-stats">
-        <strong>${highDays}</strong> high-risk ·
-        <strong>${elevatedDays}</strong> elevated ·
+        <strong>${highDays}</strong> high+ days ·
+        <strong>${veryHighDays}</strong> very-high+ ·
         avg risk ${formatPercent(avgProb)}
       </div>
     </div>
@@ -234,19 +410,30 @@ function buildCalendar(city, rows, startDate, endDate) {
       `;
     } else {
       const p = probability(row);
-      const riskClass = getRiskClass(p);
+      const band = riskBand(p);
       const isClim = (row.source || "").toLowerCase().includes("climatology");
+      const offshore = offshoreSeaProbability(row);
 
-      cell.className = `day ${riskClass} ${isClim ? "climatology" : ""}`;
-      cell.title = `${city} ${row.date}: ${formatPercent(p)} risk`;
+      cell.className = `day ${band.className} ${isClim ? "climatology" : ""}`;
+      cell.title = `${city} ${row.date}: ${band.label} ${formatPercent(p)} · port ${formatPercent(portWeatherProbability(row))} · offshore ${formatPercent(offshore)} — ${conditionLabel(row)}`;
 
       cell.innerHTML = `
         <span class="day-number">${displayDay}</span>
         <div class="day-main">
           <span class="prob">${formatPercent(p)}</span>
+          <span class="risk-word">${band.label}</span>
           <span class="source">${sourceLabel(row)}</span>
         </div>
       `;
+
+      cell.addEventListener("click", () => openRiskModal(row, cell));
+      cell.tabIndex = 0;
+      cell.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openRiskModal(row, cell);
+        }
+      });
     }
 
     calendar.appendChild(cell);
@@ -263,12 +450,10 @@ function renderDaily(rows, startDate, endDate) {
     dailyView.innerHTML = `
       <div class="city-card">
         <h2>No daily forecast found</h2>
-        <p class="subtitle">
-          The demo could not find daily.csv with a date column.
-        </p>
+        <p class="subtitle">The demo could not find daily.csv with a date column.</p>
       </div>
     `;
-    return;
+    return [];
   }
 
   const startISO = toISODate(startDate);
@@ -282,13 +467,10 @@ function renderDaily(rows, startDate, endDate) {
     dailyView.innerHTML = `
       <div class="city-card">
         <h2>No rows found for this forecast window</h2>
-        <p class="subtitle">
-          The daily prediction file loaded, but it does not contain dates from
-          ${startISO} to ${endISO}.
-        </p>
+        <p class="subtitle">The daily prediction file loaded, but it does not contain dates from ${startISO} to ${endISO}.</p>
       </div>
     `;
-    return;
+    return [];
   }
 
   const cities = [...new Set(windowRows.map(r => r.city))].sort();
@@ -300,50 +482,8 @@ function renderDaily(rows, startDate, endDate) {
 
     dailyView.appendChild(buildCalendar(city, cityRows, startDate, endDate));
   });
-}
 
-function renderMonthly(rows) {
-  if (!rows.length) {
-    monthlyTable.innerHTML = "<p>No window summary available.</p>";
-    return;
-  }
-
-  const table = document.createElement("table");
-
-  table.innerHTML = `
-    <thead>
-      <tr>
-        <th>City</th>
-        <th>Window</th>
-        <th>Probability</th>
-        <th>Risk days</th>
-        <th>Forecast days</th>
-        <th>Climatology days</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows.map(row => {
-        const windowLabel =
-          row.window_start && row.window_end
-            ? `${row.window_start} → ${row.window_end}`
-            : row.target_month || row.month || "—";
-
-        return `
-          <tr>
-            <td>${row.city}</td>
-            <td>${windowLabel}</td>
-            <td>${formatPercent(summaryProbability(row))}</td>
-            <td>${row.risk_days_predicted ?? "—"}</td>
-            <td>${row.n_short_horizon_days ?? "—"}</td>
-            <td>${row.n_climatology_days ?? "—"}</td>
-          </tr>
-        `;
-      }).join("")}
-    </tbody>
-  `;
-
-  monthlyTable.innerHTML = "";
-  monthlyTable.appendChild(table);
+  return windowRows;
 }
 
 async function init() {
@@ -361,29 +501,20 @@ async function init() {
       endDate = addDays(startDate, 30);
     }
 
-    document.getElementById("targetMonth").innerHTML = formatWindow(startDate, endDate);
+    targetMonth.innerHTML = formatWindow(startDate, endDate);
+    lastUpdated.textContent = formatGeneratedAt(latest.generated_at);
 
     const dailyText = await loadText(`${PREDICTIONS_BASE}/latest/daily.csv`);
-    const monthlyText = await loadText(`${PREDICTIONS_BASE}/latest/monthly.csv`);
-
     const dailyRows = parseCSV(dailyText);
-    const monthlyRows = parseCSV(monthlyText);
 
-    renderDaily(dailyRows, startDate, endDate);
-    renderMonthly(monthlyRows);
-
-    const startISO = toISODate(startDate);
-    const endISO = toISODate(endDate);
-
-    const visibleRows = dailyRows.filter(row => {
-      return row.date >= startISO && row.date <= endISO;
-    });
+    const visibleRows = renderDaily(dailyRows, startDate, endDate);
 
     const cities = new Set(visibleRows.map(r => r.city));
-    const highRiskDays = visibleRows.filter(r => probability(r) >= 0.25).length;
+    const highDays = visibleRows.filter(r => probability(r) >= 0.25).length;
 
-    document.getElementById("cityCount").textContent = cities.size;
-    document.getElementById("highRiskDays").textContent = highRiskDays;
+    cityCount.textContent = cities.size;
+    highRiskDays.textContent = highDays;
+
   } catch (err) {
     console.error(err);
 
@@ -391,14 +522,26 @@ async function init() {
       <div class="city-card">
         <h2>Could not load prediction files</h2>
         <p class="subtitle">
-          Make sure <code>predictions/latest.json</code>,
-          <code>predictions/latest/daily.csv</code>, and
-          <code>predictions/latest/monthly.csv</code> exist.
+          Make sure <code>predictions/latest.json</code> and
+          <code>predictions/latest/daily.csv</code> exist.
         </p>
         <p class="subtitle">${err.message}</p>
       </div>
     `;
   }
 }
+
+riskModalClose.addEventListener("click", closeRiskModal);
+riskModal.addEventListener("click", event => {
+  if (event.target.dataset.modalClose !== undefined) {
+    closeRiskModal();
+  }
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !riskModal.classList.contains("hidden")) {
+    closeRiskModal();
+  }
+});
 
 init();

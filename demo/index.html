@@ -13,8 +13,8 @@
         <p class="eyebrow">Caspian Maritime Forecast Demo</p>
         <h1>Maritime Delay-Risk Forecast</h1>
         <p class="subtitle">
-          Daily probability that weather conditions may become risky for maritime operations
-          across five Caspian Sea ports.
+          Daily adjusted maritime-risk probabilities across five Caspian ports,
+          combining port-weather forecasts with offshore sea-state exposure.
         </p>
       </div>
 
@@ -32,8 +32,8 @@
           <strong id="highRiskDays">—</strong>
         </div>
         <div class="summary-card">
-          <span class="label">Model threshold</span>
-          <strong>10%</strong>
+          <span class="label">Last updated</span>
+          <strong id="lastUpdated">—</strong>
         </div>
       </section>
     </header>
@@ -41,22 +41,20 @@
     <section class="info-panel">
       <h2>How to read this</h2>
 
-      <div class="legend">
+      <div class="legend legend-compact">
         <div class="legend-item">
           <span class="dot low"></span>
           <div>
             <strong>Low</strong>
-            <p>&lt; 10%. Normal background risk.</p>
+            <p>&lt; 10%. Proceed normally.</p>
           </div>
         </div>
 
-    
-
         <div class="legend-item">
-          <span class="dot elevated"></span>
+          <span class="dot moderate"></span>
           <div>
-            <strong>Medium</strong>
-            <p>10–25%. Risk threshold exceeded; monitor operations.</p>
+            <strong>Moderate</strong>
+            <p>10–25%. Monitor conditions.</p>
           </div>
         </div>
 
@@ -64,7 +62,23 @@
           <span class="dot high"></span>
           <div>
             <strong>High</strong>
-            <p>&gt; 25%. Strong risk signal; review schedules.</p>
+            <p>25–50%. Plan with caution.</p>
+          </div>
+        </div>
+
+        <div class="legend-item">
+          <span class="dot very-high"></span>
+          <div>
+            <strong>Very High</strong>
+            <p>50–75%. Manual review advised.</p>
+          </div>
+        </div>
+
+        <div class="legend-item">
+          <span class="dot severe"></span>
+          <div>
+            <strong>Severe</strong>
+            <p>75%+. Avoid/postpone if possible.</p>
           </div>
         </div>
       </div>
@@ -77,35 +91,31 @@
 
         <span class="source-key">
           <strong class="climatology-text">White %</strong>
-          Climatology estimate
+          climatology estimate
         </span>
       </div>
-
     </section>
 
-    <section class="controls">
-      <button id="dailyBtn" class="active">Daily calendars</button>
-      <button id="monthlyBtn">Window summary</button>
-    </section>
 
     <section id="dailyView" class="view"></section>
-
-    <section id="monthlyView" class="view hidden">
-      <div class="table-card">
-        <h2>Window summary</h2>
-        <div id="monthlyTable"></div>
-      </div>
-    </section>
 
     <section class="note">
       <h2>What the probability means</h2>
       <p>
-        The value shown for each city-date is the estimated probability that the day will
-        meet the project’s weather-based maritime delay-risk definition. It does not mean
-        a confirmed ship delay or port closure.
+        The value shown for each city-date is an adjusted maritime-risk estimate, not a confirmed ship delay or port closure.
+        Click any day to see the port-weather component, offshore sea-state component, wave estimate, main drivers, and recommended action.
       </p>
     </section>
   </main>
+
+
+    <div id="riskModal" class="risk-modal hidden" role="dialog" aria-modal="true" aria-labelledby="riskModalTitle">
+      <div class="risk-modal-backdrop" data-modal-close></div>
+      <section class="risk-modal-card">
+        <button id="riskModalClose" class="risk-modal-close" type="button" aria-label="Close details">×</button>
+        <div id="riskModalContent" class="risk-modal-content"></div>
+      </section>
+    </div>
 
   <script src="app.js"></script>
 </body>

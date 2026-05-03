@@ -62,6 +62,10 @@ def add_rolling_features(
         "temperature_2m_mean",
         "precipitation_sum",
         "wind_speed_10m_max",
+        # Maritime-specific context: use recent wave exposure, not same-day
+        # wave_height as a direct model input. These rolling summaries help
+        # the model learn persistence of rough sea-state conditions.
+        "wave_height",
     ]
     columns = columns or default_cols
     out = df.sort_values([group_by, date_col]).copy()
@@ -205,6 +209,7 @@ def add_anomaly_scores(
         "temperature_2m_mean",
         "wind_speed_10m_max",
         "precipitation_sum",
+        "wave_height",
     ]
     columns = columns or default_cols
     out = df.copy()
@@ -248,6 +253,7 @@ def add_lag_features(
         "temperature_2m_mean",
         "precipitation_sum",
         "wind_speed_10m_max",
+        "wave_height",
     ]
     columns = columns or default_cols
     out = df.sort_values([group_by, date_col]).copy()

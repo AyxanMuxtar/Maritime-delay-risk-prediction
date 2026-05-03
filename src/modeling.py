@@ -165,29 +165,53 @@ def train_model(
     model_path: str | Path = "models/daily_model.pkl",
     feature_table: str = "analytics.daily_enriched",
     decision_threshold: float = 0.10,
+    preferred_model: Optional[str] = None,
 ) -> dict:
     """
-    Train the production next-day maritime delay-risk model.
+    Train, evaluate, select, and save the production next-day model.
 
-    Production target:
-        features at day t -> target_risk_next_day = is_risk_day at day t+1
+    If preferred_model is provided, this function still evaluates all candidates
+    for reporting, but it retrains/saves that specific model family. This lets
+    Day 5/pipeline retrain the Day 8-selected winner instead of running a
+    separate model-selection contest.
 
-    This replaces the old DailyClassifier baseline. The saved object is a
-    bundle containing:
-        - calibrated sklearn model
-        - feature column list
-        - target name
-        - decision threshold
-        - metadata for the app/pipeline
+    IMPORTANT SINGLE-WORKFLOW DESIGN
+    --------------------------------
+    This function is the only source of truth for production model selection.
+    The pipeline calls this function, and Day 8 should call this function too.
+
+    It writes BOTH:
+      - models/daily_model.pkl
+      - reports/day08_model_comparison.csv
+
+    So Day 5, Day 8, and the pipeline all read the same production artifact.
     """
-    logger.info("Training calibrated next-day model on %s ...", feature_table)
+    logger.info("Training/evaluating production model on %s ...", feature_table)
 
+    from sklearn.base import clone
     from sklearn.pipeline import Pipeline
     from sklearn.compose import ColumnTransformer
     from sklearn.preprocessing import StandardScaler, OneHotEncoder
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LogisticRegression
+    from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.metrics import (
+        accuracy_score,
+        precision_score,
+        recall_score,
+        f1_score,
+        roc_auc_score,
+        brier_score_loss,
+    )
+
+    try:
+        from src.config import PATHS
+        reports_dir = Path(PATHS["repo_root"]) / "reports"
+    except Exception:
+        reports_dir = Path(model_path).resolve().parent.parent / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    comparison_path = reports_dir / "day08_model_comparison.csv"
 
     df = conn.execute(f"""
         SELECT *
@@ -200,75 +224,61 @@ def train_model(
 
     if "is_risk_day" not in df.columns:
         raise ValueError(
-            f"{feature_table} is missing 'is_risk_day'. "
-            "Build analytics layer before training."
+            f"{feature_table} is missing 'is_risk_day'. Build analytics first."
         )
 
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values(["city", "date"]).reset_index(drop=True)
 
-    # Next-day target: today's features predict tomorrow's risk
+    # Production target: today's features predict tomorrow's risk.
     target = "target_risk_next_day"
     df[target] = df.groupby("city")["is_risk_day"].shift(-1)
 
     df_model = df.dropna(subset=[target]).copy()
     df_model[target] = df_model[target].astype(int)
 
-    # These must never be used as model inputs
+    # Do NOT feed direct same-day threshold variables into the model.
+    # Those variables are used to define is_risk_day and would cause leakage.
     leakage_cols = {
-    # targets / labels
-    "is_risk_day",
-    "target_risk_next_day",
-    "high_risk_month",
-    "risk_days",
-    "risk_day_pct",
+        "is_risk_day", "target_risk_next_day", "high_risk_month",
+        "risk_days", "risk_day_pct",
+        "wind_speed_10m_max", "wind_gusts_10m_max", "precipitation_sum",
+        "rain_sum", "snowfall_sum", "visibility_mean", "visibility_min",
+        "visibility_hours_below_1km", "wave_height",
+        "risk_wind", "risk_gust", "risk_precip", "risk_snow",
+        "risk_wave", "risk_visibility", "risk_fog_min", "risk_fog_proxy",
+    }
 
-    # direct same-day threshold variables used to define risk
-    "wind_speed_10m_max",
-    "wind_gusts_10m_max",
-    "precipitation_sum",
-    "rain_sum",
-    "snowfall_sum",
-    "visibility_mean",
-    "visibility_min",
-    "visibility_hours_below_1km",
-    "wave_height",
+    maritime_context_candidates = [
+        "wave_height_lag1", "wave_height_lag2",
+        "wave_height_7d_mean", "wave_height_7d_max",
+        "wave_height_30d_mean", "wave_height_30d_max",
+        "wave_height_anom",
+    ]
 
-    # direct risk flags
-    "risk_wind",
-    "risk_gust",
-    "risk_precip",
-    "risk_snow",
-    "risk_wave",
-    "risk_visibility",
-    "risk_fog_min",
-    "risk_fog_proxy",
-}
-
-    # Use Day-7 selected features as source of truth
     try:
         from reports.selected_features import SELECTED_FEATURES
-
         feature_cols = [
             c for c in SELECTED_FEATURES
             if c in df_model.columns and c not in leakage_cols
         ]
-
-        logger.info("  Using %d Day-7 selected leakage-safe features", len(feature_cols))
-
+        logger.info("  Loaded %d Day-7 selected leakage-safe features", len(feature_cols))
     except Exception as exc:
         logger.warning(
-            "Could not load reports.selected_features.SELECTED_FEATURES: %s",
-            exc,
+            "Could not load reports.selected_features.SELECTED_FEATURES: %s", exc
         )
-        logger.warning("Falling back to all leakage-safe non-target columns.")
-
         excluded = leakage_cols | {"date"}
-        feature_cols = [
-            c for c in df_model.columns
-            if c not in excluded
-        ]
+        feature_cols = [c for c in df_model.columns if c not in excluded]
+
+    added_maritime = []
+    for c in maritime_context_candidates:
+        if c in df_model.columns and c not in leakage_cols and c not in feature_cols:
+            feature_cols.append(c)
+            added_maritime.append(c)
+
+    if added_maritime:
+        logger.info("  Added maritime context features: %s", added_maritime)
 
     if not feature_cols:
         raise ValueError("No usable feature columns found for training")
@@ -276,104 +286,640 @@ def train_model(
     X = df_model[feature_cols].copy()
     y = df_model[target].astype(int).values
 
-    categorical_features = [
-        c for c in ["city", "season"]
-        if c in feature_cols
-    ]
+    categorical_features = [c for c in ["city", "season"] if c in feature_cols]
+    numeric_features = [c for c in feature_cols if c not in categorical_features]
 
-    numeric_features = [
-        c for c in feature_cols
-        if c not in categorical_features
-    ]
+    def _make_preprocess(scale_numeric: bool = True) -> ColumnTransformer:
+        num_steps = [("imputer", SimpleImputer(strategy="median"))]
+        if scale_numeric:
+            num_steps.append(("scaler", StandardScaler()))
 
-    numeric_transformer = Pipeline(steps=[
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-    ])
+        numeric_transformer = Pipeline(steps=num_steps)
+        categorical_transformer = Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(drop="first", handle_unknown="ignore")),
+        ])
 
-    categorical_transformer = Pipeline(steps=[
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(drop="first", handle_unknown="ignore")),
-    ])
+        return ColumnTransformer(
+            transformers=[
+                ("num", numeric_transformer, numeric_features),
+                ("cat", categorical_transformer, categorical_features),
+            ],
+            remainder="drop",
+        )
 
-    preprocess = ColumnTransformer(
-        transformers=[
-            ("num", numeric_transformer, numeric_features),
-            ("cat", categorical_transformer, categorical_features),
-        ],
-        remainder="drop",
+    def _pipeline(base_estimator, scale_numeric: bool = True):
+        return Pipeline(steps=[
+            ("preprocess", _make_preprocess(scale_numeric=scale_numeric)),
+            ("model", base_estimator),
+        ])
+
+    def _calibrated_pipeline(base_estimator, scale_numeric: bool = True):
+        base_pipeline = _pipeline(base_estimator, scale_numeric=scale_numeric)
+        try:
+            return CalibratedClassifierCV(
+                estimator=base_pipeline,
+                method="sigmoid",
+                cv=3,
+            )
+        except TypeError:
+            return CalibratedClassifierCV(
+                base_estimator=base_pipeline,
+                method="sigmoid",
+                cv=3,
+            )
+
+    def _tune_threshold(y_true: np.ndarray, probs: np.ndarray) -> dict:
+        thresholds = np.arange(0.01, 0.81, 0.01)
+        rows = []
+        for t in thresholds:
+            pred = (probs >= t).astype(int)
+            rows.append({
+                "threshold": float(round(t, 2)),
+                "accuracy": float(accuracy_score(y_true, pred)),
+                "precision": float(precision_score(y_true, pred, zero_division=0)),
+                "recall": float(recall_score(y_true, pred, zero_division=0)),
+                "f1": float(f1_score(y_true, pred, zero_division=0)),
+                "predicted_positive_rate": float(pred.mean()),
+            })
+        return sorted(
+            rows,
+            key=lambda r: (
+                r["f1"],
+                r["recall"],
+                r["precision"],
+                -abs(r["threshold"] - decision_threshold),
+            ),
+            reverse=True,
+        )[0]
+
+    def _safe_auc(y_true, probs) -> float:
+        try:
+            return float(roc_auc_score(y_true, probs))
+        except Exception:
+            return float("nan")
+
+    def _safe_brier(y_true, probs) -> float:
+        try:
+            return float(brier_score_loss(y_true, probs))
+        except Exception:
+            return float("nan")
+
+    def _adjust_validation_probs(port_probs: np.ndarray, rows_df: pd.DataFrame) -> np.ndarray:
+        adjusted = []
+        for p_port, (_, hist_row) in zip(port_probs, rows_df.iterrows()):
+            try:
+                offshore_info = _offshore_risk_from_row(hist_row)
+                p_sea = float(offshore_info.get("offshore_sea_probability", 0.0) or 0.0)
+                adjusted.append(
+                    _adjust_maritime_probability(
+                        port_weather_probability=float(p_port),
+                        offshore_sea_probability=p_sea,
+                    )
+                )
+            except Exception:
+                adjusted.append(float(p_port))
+        return np.asarray(adjusted, dtype=float)
+
+    # Use calendar-year 2024 for the evaluation report if available, because
+    # this is what Day 8 historically reported. If 2024 is unavailable, use a
+    # temporal last-20% split.
+    years = pd.to_datetime(df_model["date"]).dt.year
+    if (years == 2024).sum() >= 50 and len(np.unique(y[(years == 2024).values])) >= 2:
+        train_mask = years < 2024
+        val_mask = years == 2024
+        validation_note = "2024 holdout evaluation set"
+    else:
+        unique_dates = np.array(sorted(pd.to_datetime(df_model["date"]).dt.normalize().unique()))
+        split_idx = int(len(unique_dates) * 0.80)
+        split_idx = max(1, min(split_idx, len(unique_dates) - 1))
+        split_date = unique_dates[split_idx]
+        train_mask = pd.to_datetime(df_model["date"]).dt.normalize() < split_date
+        val_mask = ~train_mask
+        validation_note = f"temporal holdout from {pd.Timestamp(split_date).date()} onward"
+
+    # Defensive fallback if the temporal split does not contain both classes.
+    if (
+        train_mask.sum() < 100 or val_mask.sum() < 50 or
+        len(np.unique(y[train_mask.values])) < 2 or
+        len(np.unique(y[val_mask.values])) < 2
+    ):
+        from sklearn.model_selection import train_test_split
+        idx = np.arange(len(df_model))
+        train_idx, val_idx = train_test_split(
+            idx,
+            test_size=0.20,
+            random_state=42,
+            stratify=y,
+        )
+        train_mask = pd.Series(False, index=df_model.index)
+        val_mask = pd.Series(False, index=df_model.index)
+        train_mask.iloc[train_idx] = True
+        val_mask.iloc[val_idx] = True
+        validation_note = "stratified random holdout evaluation set"
+
+    X_train = X.loc[train_mask].copy()
+    y_train = y[train_mask.values]
+    X_val = X.loc[val_mask].copy()
+    y_val = y[val_mask.values]
+    df_train = df_model.loc[train_mask].copy()
+    df_val = df_model.loc[val_mask].copy()
+
+    logger.info(
+        "  Model selection/evaluation using %s: train=%d, eval=%d, eval positive rate=%.3f",
+        validation_note, len(X_train), len(X_val), float(y_val.mean()),
     )
 
-    base_model = LogisticRegression(
-        class_weight="balanced",
-        max_iter=1000,
-        random_state=42,
-        solver="lbfgs",
-    )
+    selection_rows = []
+    production_candidates = {}
 
-    base_pipeline = Pipeline(steps=[
-        ("preprocess", preprocess),
-        ("model", base_model),
-    ])
-
-    # Calibrated model for trustworthy user-facing probabilities
+    # Baseline: per-(city, day-of-year) historical next-day risk rate.
     try:
-        production_model = CalibratedClassifierCV(
-            estimator=base_pipeline,
-            method="isotonic",
-            cv=5,
-        )
-    except TypeError:
-        # Older sklearn compatibility
-        production_model = CalibratedClassifierCV(
-            base_estimator=base_pipeline,
-            method="isotonic",
-            cv=5,
-        )
+        clim_train = df_train[["city", "date", target]].copy()
+        clim_train = clim_train.rename(columns={target: "is_risk_day"})
+        clim = ClimatologyTable(smoothing_window=7).fit(clim_train)
+        p_clim = clim.predict_proba_df(df_val[["city", "date"]].copy())
+        best_t = _tune_threshold(y_val, p_clim)
+        selection_rows.append({
+            "Model": "Climatology",
+            "Threshold": best_t["threshold"],
+            "Accuracy": round(best_t["accuracy"], 3),
+            "Precision": round(best_t["precision"], 3),
+            "Recall": round(best_t["recall"], 3),
+            "F1": round(best_t["f1"], 3),
+            "ROC-AUC": round(_safe_auc(y_val, p_clim), 3),
+            "Brier": round(_safe_brier(y_val, p_clim), 3),
+            "Predicted positive rate": round(best_t["predicted_positive_rate"], 3),
+            "Eligible": False,
+            "Selected": False,
+            "Production score": np.nan,
+            "Notes": "Baseline: per-(city,doy) historical next-day risk rate | threshold tuned for F1",
+        })
+    except Exception as exc:
+        logger.warning("  Climatology baseline evaluation failed: %s", exc)
 
+    model_specs = [
+        (
+            "LogisticRegression",
+            LogisticRegression(class_weight="balanced", max_iter=2000, random_state=42, solver="lbfgs"),
+            True,
+            False,
+            "Linear; interpretable coefficients",
+        ),
+        (
+            "LogisticRegression_calibrated",
+            LogisticRegression(class_weight="balanced", max_iter=2000, random_state=42, solver="lbfgs"),
+            True,
+            True,
+            "Logistic Regression with sigmoid probability calibration",
+        ),
+        (
+            "RandomForest",
+            RandomForestClassifier(
+                n_estimators=350, max_depth=None, min_samples_leaf=4,
+                max_features="sqrt", class_weight="balanced_subsample",
+                random_state=42, n_jobs=-1,
+            ),
+            False,
+            False,
+            "Bagged decision trees; non-linear interactions",
+        ),
+        (
+            "RandomForest_calibrated",
+            RandomForestClassifier(
+                n_estimators=350, max_depth=None, min_samples_leaf=4,
+                max_features="sqrt", class_weight="balanced_subsample",
+                random_state=42, n_jobs=-1,
+            ),
+            False,
+            True,
+            "RandomForest with sigmoid probability calibration",
+        ),
+        (
+            "ExtraTrees",
+            ExtraTreesClassifier(
+                n_estimators=350, max_depth=None, min_samples_leaf=4,
+                max_features="sqrt", class_weight="balanced",
+                random_state=42, n_jobs=-1,
+            ),
+            False,
+            False,
+            "Extremely randomized trees; non-linear baseline",
+        ),
+        (
+            "ExtraTrees_calibrated",
+            ExtraTreesClassifier(
+                n_estimators=350, max_depth=None, min_samples_leaf=4,
+                max_features="sqrt", class_weight="balanced",
+                random_state=42, n_jobs=-1,
+            ),
+            False,
+            True,
+            "ExtraTrees with sigmoid probability calibration",
+        ),
+    ]
+
+    # Optional XGBoost if installed. Do not fail the pipeline if unavailable.
+    try:
+        from xgboost import XGBClassifier
+        xgb = XGBClassifier(
+            n_estimators=250,
+            max_depth=3,
+            learning_rate=0.05,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            eval_metric="logloss",
+            random_state=42,
+            n_jobs=-1,
+        )
+        model_specs.extend([
+            ("XGBoost", xgb, False, False, "Tree boosting model; non-linear; regularised"),
+            ("XGBoost_calibrated", clone(xgb), False, True, "Boosting model with sigmoid probability calibration"),
+        ])
+    except Exception:
+        pass
+
+    # Fast production path used by Day 5 / pipeline:
+    # Day 8 has already evaluated candidates and written the selected winner to
+    # reports/day08_model_comparison.csv. In that case we do NOT run a second
+    # model-selection contest here. We only retrain the Day-8 selected model
+    # family on the latest full analytics table, then save daily_model.pkl.
+    spec_by_name = {
+        name: {
+            "estimator": estimator,
+            "scale_numeric": scale_numeric,
+            "calibrate": calibrate,
+            "note": note,
+        }
+        for name, estimator, scale_numeric, calibrate, note in model_specs
+    }
+
+    if preferred_model:
+        preferred_model = str(preferred_model)
+        if preferred_model not in spec_by_name:
+            available = ", ".join(sorted(spec_by_name))
+            raise ValueError(
+                f"Day 8 selected {preferred_model!r}, but that model family is not available in src.modeling. "
+                f"Available candidates: {available}"
+            )
+
+        comparison_df = None
+        selected_report_row = None
+        selected_threshold = float(decision_threshold)
+
+        if comparison_path.exists():
+            try:
+                comparison_df = pd.read_csv(comparison_path)
+                if "Model" in comparison_df.columns:
+                    matches = comparison_df[comparison_df["Model"].astype(str) == preferred_model]
+                    if matches.empty:
+                        norm_pref = preferred_model.lower().replace(" ", "").replace("-", "_")
+                        norm_col = (
+                            comparison_df["Model"].astype(str)
+                            .str.lower()
+                            .str.replace(" ", "", regex=False)
+                            .str.replace("-", "_", regex=False)
+                        )
+                        matches = comparison_df[norm_col == norm_pref]
+                    if not matches.empty:
+                        selected_report_row = matches.iloc[0]
+                        if "Threshold" in selected_report_row and pd.notna(selected_report_row["Threshold"]):
+                            selected_threshold = float(selected_report_row["Threshold"])
+
+                        # Repair the report if Selected=True was missing, so Day 5 summaries stay consistent.
+                        if "Selected" not in comparison_df.columns:
+                            comparison_df["Selected"] = False
+                        comparison_df["Selected"] = False
+                        comparison_df.loc[matches.index[0], "Selected"] = True
+                        comparison_df.to_csv(comparison_path, index=False)
+            except Exception as exc:
+                logger.warning("  Could not read/repair Day 8 comparison report %s: %s", comparison_path, exc)
+
+        spec = spec_by_name[preferred_model]
+        if bool(spec["calibrate"]):
+            production_model = _calibrated_pipeline(
+                clone(spec["estimator"]),
+                scale_numeric=bool(spec["scale_numeric"]),
+            )
+        else:
+            production_model = _pipeline(
+                clone(spec["estimator"]),
+                scale_numeric=bool(spec["scale_numeric"]),
+            )
+
+        logger.info(
+            "  Retraining Day-8 selected production model only: %s  threshold=%.2f",
+            preferred_model,
+            selected_threshold,
+        )
+        production_model.fit(X, y)
+
+        def _row_float(key: str, default=float("nan")) -> float:
+            try:
+                if selected_report_row is not None and key in selected_report_row and pd.notna(selected_report_row[key]):
+                    return float(selected_report_row[key])
+            except Exception:
+                pass
+            return default
+
+        model_bundle = {
+            "model": production_model,
+            "model_name": preferred_model,
+            "base_model_name": preferred_model.replace("_calibrated", ""),
+            "is_calibrated": preferred_model.endswith("_calibrated"),
+            "calibration_method": "sigmoid" if preferred_model.endswith("_calibrated") else "none",
+            "maritime_probability_calibrator": None,
+            "maritime_calibration": {
+                "enabled": False,
+                "method": None,
+                "note": "Disabled: final displayed score uses raw maritime adjustment; classification threshold is tuned separately.",
+            },
+            "maritime_adjustment_weight": OFFSHORE_ADJUSTMENT_WEIGHT,
+            "decision_threshold": selected_threshold,
+            "threshold_tuning": {
+                "threshold": selected_threshold,
+                "accuracy": _row_float("Accuracy"),
+                "precision": _row_float("Precision"),
+                "recall": _row_float("Recall"),
+                "f1": _row_float("F1"),
+                "roc_auc": _row_float("ROC-AUC"),
+                "brier": _row_float("Brier"),
+            },
+            "model_selection_policy": (
+                "Day 8 selects the winning algorithm and writes reports/day08_model_comparison.csv. "
+                "Day 5/pipeline retrains that same selected algorithm on the latest full analytics data."
+            ),
+            "comparison_report_path": str(comparison_path),
+            "selection_source": "day8_selected_model",
+            "target": target,
+            "feature_cols": feature_cols,
+            "trained_rows": int(len(df_model)),
+            "positive_rate": float(y.mean()),
+            "description": (
+                "Production model retrained from the Day-8 selected model family; "
+                "features at day t -> P(risk on day t+1)."
+            ),
+        }
+
+        model_path = Path(model_path)
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        with model_path.open("wb") as f:
+            pickle.dump(model_bundle, f)
+
+        logger.info("  Saved Day-8 selected production model → %s", model_path)
+        logger.info("  Feature count: %d", len(feature_cols))
+        logger.info("  Positive rate: %.4f", float(y.mean()))
+
+        return {
+            "rows_trained": int(len(df_model)),
+            "n_features": int(len(feature_cols)),
+            "positive_rate": round(float(y.mean()), 4),
+            "model_path": str(model_path),
+            "model_type": preferred_model,
+            "target": target,
+            "decision_threshold": selected_threshold,
+            "is_calibrated": preferred_model.endswith("_calibrated"),
+            "calibration_method": "sigmoid" if preferred_model.endswith("_calibrated") else "none",
+            "comparison_report_path": str(comparison_path),
+            "selection_source": "day8_selected_model",
+            "validation_f1": round(_row_float("F1"), 4) if not pd.isna(_row_float("F1")) else None,
+            "validation_precision": round(_row_float("Precision"), 4) if not pd.isna(_row_float("Precision")) else None,
+            "validation_recall": round(_row_float("Recall"), 4) if not pd.isna(_row_float("Recall")) else None,
+            "validation_roc_auc": round(_row_float("ROC-AUC"), 4) if not pd.isna(_row_float("ROC-AUC")) else None,
+            "validation_brier": round(_row_float("Brier"), 4) if not pd.isna(_row_float("Brier")) else None,
+            "added_maritime_features": added_maritime,
+        }
+
+    for name, estimator, scale_numeric, calibrate, note in model_specs:
+        try:
+            if calibrate:
+                candidate_model = _calibrated_pipeline(clone(estimator), scale_numeric=scale_numeric)
+            else:
+                candidate_model = _pipeline(clone(estimator), scale_numeric=scale_numeric)
+
+            candidate_model.fit(X_train, y_train)
+            port_probs = candidate_model.predict_proba(X_val)[:, 1]
+            probs = _adjust_validation_probs(port_probs, df_val)
+            best_t = _tune_threshold(y_val, probs)
+
+            auc = _safe_auc(y_val, probs)
+            brier = _safe_brier(y_val, probs)
+
+            row = {
+                "Model": name,
+                "Threshold": best_t["threshold"],
+                "Accuracy": round(best_t["accuracy"], 3),
+                "Precision": round(best_t["precision"], 3),
+                "Recall": round(best_t["recall"], 3),
+                "F1": round(best_t["f1"], 3),
+                "ROC-AUC": round(auc, 3),
+                "Brier": round(brier, 3),
+                "Predicted positive rate": round(best_t["predicted_positive_rate"], 3),
+                "Eligible": False,
+                "Selected": False,
+                "Production score": np.nan,
+                "Notes": f"{note} | threshold tuned for F1",
+                "_estimator": estimator,
+                "_scale_numeric": scale_numeric,
+                "_calibrate": calibrate,
+                "_raw_f1": float(best_t["f1"]),
+                "_raw_recall": float(best_t["recall"]),
+                "_raw_auc": float(auc) if not np.isnan(auc) else np.nan,
+                "_raw_brier": float(brier) if not np.isnan(brier) else np.nan,
+            }
+            selection_rows.append(row)
+            production_candidates[name] = row
+
+            logger.info(
+                "  Candidate %-28s F1=%.3f  P=%.3f  R=%.3f  AUC=%.3f  Brier=%.3f  threshold=%.2f",
+                name, row["F1"], row["Precision"], row["Recall"], row["ROC-AUC"], row["Brier"], row["Threshold"],
+            )
+        except Exception as exc:
+            logger.warning("  Candidate %s failed: %s", name, exc)
+
+    if not production_candidates:
+        raise RuntimeError("All production model candidates failed")
+
+    comparison_df = pd.DataFrame(selection_rows)
+
+    if "Climatology" in set(comparison_df["Model"]):
+        baseline = comparison_df[comparison_df["Model"] == "Climatology"].iloc[0]
+        baseline_f1 = float(baseline["F1"])
+        baseline_auc = float(baseline["ROC-AUC"])
+        baseline_brier = float(baseline["Brier"])
+    else:
+        baseline_f1 = 0.0
+        baseline_auc = 0.0
+        baseline_brier = 1.0
+
+    # Production eligibility: must improve over climatology as a probability
+    # forecast and not collapse recall. This prevents the bad situation where a
+    # model with poor Brier or tiny recall wins because of a single metric.
+    production_rows = comparison_df[comparison_df["Model"] != "Climatology"].copy()
+    production_rows["Eligible"] = (
+        (production_rows["F1"].astype(float) >= baseline_f1) &
+        (production_rows["ROC-AUC"].astype(float) >= baseline_auc) &
+        (production_rows["Brier"].astype(float) <= baseline_brier + 0.005) &
+        (production_rows["Recall"].astype(float) >= 0.25)
+    )
+
+    # Composite production score: detection + recall + ranking + probability quality.
+    production_rows["Production score"] = (
+        0.35 * production_rows["F1"].astype(float) +
+        0.20 * production_rows["Recall"].astype(float) +
+        0.20 * production_rows["ROC-AUC"].astype(float) +
+        0.25 * (1.0 - production_rows["Brier"].astype(float))
+    )
+
+    eligible = production_rows[production_rows["Eligible"]].copy()
+    if eligible.empty:
+        logger.warning(
+            "  No candidate passed baseline/Brier/recall guardrails; falling back to highest production score."
+        )
+        eligible = production_rows.copy()
+
+    selection_source = "internal_production_score"
+
+    if preferred_model:
+        preferred_model = str(preferred_model)
+        if preferred_model not in production_candidates:
+            logger.warning(
+                "  Preferred model from Day 8 (%s) is not available in current candidates; "
+                "falling back to internal production score.",
+                preferred_model,
+            )
+            winner_row = eligible.sort_values(
+                by=["Production score", "Brier", "F1", "Recall"],
+                ascending=[False, True, False, False],
+            ).iloc[0]
+        else:
+            winner_matches = production_rows[production_rows["Model"].astype(str) == preferred_model]
+            if winner_matches.empty:
+                raise RuntimeError(f"Preferred model {preferred_model!r} was found in candidates but not in report rows")
+            winner_row = winner_matches.iloc[0]
+            selection_source = "day8_selected_model"
+            logger.info("  Using Day 8-selected model for production retraining: %s", preferred_model)
+    else:
+        winner_row = eligible.sort_values(
+            by=["Production score", "Brier", "F1", "Recall"],
+            ascending=[False, True, False, False],
+        ).iloc[0]
+
+    selected_model_name = str(winner_row["Model"])
+    selected_threshold = float(winner_row["Threshold"])
+    selected_spec = production_candidates[selected_model_name]
+
+    logger.info(
+        "  Selected production model: %s  threshold=%.2f  F1=%.3f  Recall=%.3f  AUC=%.3f  Brier=%.3f  source=%s",
+        selected_model_name,
+        selected_threshold,
+        float(winner_row["F1"]),
+        float(winner_row["Recall"]),
+        float(winner_row["ROC-AUC"]),
+        float(winner_row["Brier"]),
+        selection_source,
+    )
+
+    # Fit selected model on ALL available rows for the actual production pickle.
+    if bool(selected_spec["_calibrate"]):
+        production_model = _calibrated_pipeline(
+            clone(selected_spec["_estimator"]),
+            scale_numeric=bool(selected_spec["_scale_numeric"]),
+        )
+    else:
+        production_model = _pipeline(
+            clone(selected_spec["_estimator"]),
+            scale_numeric=bool(selected_spec["_scale_numeric"]),
+        )
     production_model.fit(X, y)
+
+    # Clean report columns and mark selected row.
+    comparison_df = comparison_df.drop(columns=[c for c in comparison_df.columns if c.startswith("_")], errors="ignore")
+    comparison_df.loc[comparison_df["Model"].isin(production_rows[production_rows["Eligible"]]["Model"]), "Eligible"] = True
+    comparison_df.loc[comparison_df["Model"] == selected_model_name, "Selected"] = True
+    for _, pr in production_rows.iterrows():
+        comparison_df.loc[comparison_df["Model"] == pr["Model"], "Production score"] = round(float(pr["Production score"]), 4)
+
+    comparison_df = comparison_df.sort_values(
+        by=["Selected", "Eligible", "Production score", "F1"],
+        ascending=[False, False, False, False],
+    ).reset_index(drop=True)
+    comparison_df.to_csv(comparison_path, index=False)
+    logger.info("  Saved model comparison report → %s", comparison_path)
 
     model_bundle = {
         "model": production_model,
-        "model_name": "LogisticRegression_calibrated",
-        "base_model_name": "LogisticRegression",
-        "is_calibrated": True,
-        "calibration_method": "isotonic",
-        "decision_threshold": float(decision_threshold),
+        "model_name": selected_model_name,
+        "base_model_name": selected_model_name.replace("_calibrated", ""),
+        "is_calibrated": selected_model_name.endswith("_calibrated"),
+        "calibration_method": "sigmoid" if selected_model_name.endswith("_calibrated") else "none",
+        "maritime_probability_calibrator": None,
+        "maritime_calibration": {
+            "enabled": False,
+            "method": None,
+            "note": "Disabled: final displayed score uses raw maritime adjustment; classification threshold is tuned separately.",
+        },
+        "maritime_adjustment_weight": OFFSHORE_ADJUSTMENT_WEIGHT,
+        "decision_threshold": selected_threshold,
+        "threshold_tuning": {
+            "threshold": selected_threshold,
+            "accuracy": float(winner_row["Accuracy"]),
+            "precision": float(winner_row["Precision"]),
+            "recall": float(winner_row["Recall"]),
+            "f1": float(winner_row["F1"]),
+            "roc_auc": float(winner_row["ROC-AUC"]),
+            "brier": float(winner_row["Brier"]),
+        },
+        "model_selection_policy": (
+            "Day 8 selects the winning algorithm. If preferred_model is passed from the Day 8 report, "
+            "the pipeline retrains that same algorithm on the latest data; otherwise train_model() falls back "
+            "to its internal weighted production score."
+        ),
+        "model_selection_source": selection_source,
+        "preferred_model": preferred_model,
+        "model_selection": comparison_df.to_dict(orient="records"),
+        "comparison_report_path": str(comparison_path),
+        "validation_note": validation_note,
         "target": target,
         "feature_cols": feature_cols,
         "trained_rows": int(len(df_model)),
         "positive_rate": float(y.mean()),
         "description": (
-            "Production next-day delay-risk model: "
-            "features at day t -> calibrated P(risk on day t+1)"
+            "Tuned next-day maritime delay-risk model selected by the same train_model() "
+            "workflow used by Day 8 and the production pipeline."
         ),
     }
 
     model_path = Path(model_path)
     model_path.parent.mkdir(parents=True, exist_ok=True)
-
     with model_path.open("wb") as f:
         pickle.dump(model_bundle, f)
 
-    logger.info("  Saved calibrated next-day model → %s", model_path)
+    logger.info("  Saved production model → %s", model_path)
     logger.info("  Feature count: %d", len(feature_cols))
     logger.info("  Positive rate: %.4f", float(y.mean()))
-    logger.info("  Decision threshold: %.2f", decision_threshold)
 
     return {
         "rows_trained": int(len(df_model)),
         "n_features": int(len(feature_cols)),
         "positive_rate": round(float(y.mean()), 4),
         "model_path": str(model_path),
-        "model_type": "LogisticRegression_calibrated",
+        "model_type": selected_model_name,
         "target": target,
-        "decision_threshold": float(decision_threshold),
-        "is_calibrated": True,
+        "decision_threshold": selected_threshold,
+        "is_calibrated": selected_model_name.endswith("_calibrated"),
+        "calibration_method": "sigmoid" if selected_model_name.endswith("_calibrated") else "none",
+        "validation_note": validation_note,
+        "comparison_report_path": str(comparison_path),
+        "validation_f1": round(float(winner_row["F1"]), 4),
+        "validation_precision": round(float(winner_row["Precision"]), 4),
+        "validation_recall": round(float(winner_row["Recall"]), 4),
+        "validation_roc_auc": round(float(winner_row["ROC-AUC"]), 4),
+        "validation_brier": round(float(winner_row["Brier"]), 4),
+        "added_maritime_features": added_maritime,
+        "model_selection_source": selection_source,
+        "preferred_model": preferred_model,
     }
-
-
-
 
 
 def build_climatology(
@@ -563,6 +1109,335 @@ def _build_forecast_features_with_lookback(
 
     return pred_df
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4b. Offshore sea-state adjustment helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+OFFSHORE_ADJUSTMENT_WEIGHT = 0.45
+
+
+def _safe_float(row, col: str) -> Optional[float]:
+    """Read a numeric value safely from a Series/dict-like row."""
+    try:
+        if row is None:
+            return None
+        value = row.get(col, None)
+        if value is None or pd.isna(value):
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _threshold_score(value: Optional[float], threshold: float, cap: float = 0.85) -> float:
+    """
+    Convert a physical sea-state value into a probability-like risk score.
+
+    The score rises smoothly around the operational threshold instead of
+    switching abruptly from 0 to 1. This makes the offshore adjustment useful
+    even when waves are close to, but not above, the formal cutoff.
+    """
+    if value is None or threshold <= 0:
+        return 0.0
+
+    ratio = max(float(value), 0.0) / threshold
+    score = cap / (1.0 + np.exp(-6.0 * (ratio - 1.0)))
+    return float(np.clip(score, 0.0, cap))
+
+
+def _offshore_risk_from_row(row) -> dict:
+    """
+    Estimate offshore sea-state risk from marine forecast/proxy columns.
+
+    Uses Caspian operational thresholds:
+      - significant wave height around 2.5m is high risk
+      - wind-wave and swell components add supporting evidence
+    """
+    wave = (
+        _safe_float(row, "wave_height_max")
+        or _safe_float(row, "wave_height")
+        or _safe_float(row, "wave_height_estimated")
+    )
+    wind_wave = _safe_float(row, "wind_wave_height_max")
+    swell = _safe_float(row, "swell_wave_height_max")
+    period = _safe_float(row, "wave_period_max") or _safe_float(row, "swell_wave_period_max")
+
+    candidates = []
+    if wave is not None:
+        candidates.append(("offshore wave height", _threshold_score(wave, 2.5, cap=0.85), wave))
+    if wind_wave is not None:
+        candidates.append(("wind-wave height", _threshold_score(wind_wave, 2.0, cap=0.75), wind_wave))
+    if swell is not None:
+        candidates.append(("swell height", _threshold_score(swell, 1.5, cap=0.65), swell))
+
+    if not candidates:
+        return {
+            "offshore_sea_probability": 0.0,
+            "offshore_driver": "offshore sea-state data unavailable",
+            "offshore_wave_height_m": np.nan,
+            "offshore_source": "not_available",
+        }
+
+    driver, base_score, driver_value = max(candidates, key=lambda x: x[1])
+
+    # Longer-period waves can be operationally uncomfortable even when height is
+    # moderate, but they should not dominate the score alone.
+    period_bonus = 0.0
+    if period is not None and period >= 6.0 and wave is not None and wave >= 1.0:
+        period_bonus = 0.08
+
+    offshore_prob = float(np.clip(base_score + period_bonus, 0.0, 0.90))
+
+    if wave is not None:
+        wave_out = round(float(wave), 2)
+    else:
+        wave_out = np.nan
+
+    return {
+        "offshore_sea_probability": round(offshore_prob, 4),
+        "offshore_driver": driver,
+        "offshore_driver_value": round(float(driver_value), 2),
+        "offshore_wave_height_m": wave_out,
+        "offshore_source": "marine_forecast",
+    }
+
+
+def _adjust_maritime_probability(port_weather_probability: float,
+                                 offshore_sea_probability: float,
+                                 offshore_weight: float = OFFSHORE_ADJUSTMENT_WEIGHT) -> float:
+    """
+    Combine port-weather risk and offshore sea-state risk as separate failure modes.
+
+    We weight the offshore component so that it adjusts the ML risk rather than
+    replacing it. This keeps the model probability central while surfacing a
+    maritime-specific hazard that a normal weather forecast does not provide.
+    """
+    p_port = float(np.clip(port_weather_probability, 0.0, 1.0))
+    p_sea = float(np.clip(offshore_sea_probability, 0.0, 1.0))
+    effective_sea = float(np.clip(offshore_weight * p_sea, 0.0, 1.0))
+    return float(np.clip(1.0 - (1.0 - p_port) * (1.0 - effective_sea), 0.0, 0.95))
+
+
+
+def _calibrate_maritime_probability(probability: float, model_bundle: Optional[dict]) -> float:
+    """Apply the saved calibration mapping to the final adjusted maritime score."""
+    p = float(np.clip(probability, 0.0, 1.0))
+
+    if not isinstance(model_bundle, dict):
+        return p
+
+    calibrator = model_bundle.get("maritime_probability_calibrator")
+    if calibrator is None:
+        return p
+
+    try:
+        calibrated = float(calibrator.predict(np.array([p], dtype=float))[0])
+        return float(np.clip(calibrated, 0.0, 0.95))
+    except Exception as exc:
+        logger.warning("  Maritime probability calibration failed at prediction time: %s", exc)
+        return p
+
+
+def _try_fetch_offshore_marine_forecast(
+    cities: list[str],
+    cities_meta: dict,
+    forecast_days: int = 7,
+) -> dict[tuple[str, str], dict]:
+    """
+    Fetch live offshore marine forecast for each city using its offshore point.
+
+    Returns a lookup keyed by (city, 'YYYY-MM-DD'). Failures are non-fatal; the
+    caller can fall back to historical wave climatology.
+    """
+    try:
+        from src.era5_client import fetch_marine_forecast, MARINE_DAILY_VARIABLES
+    except Exception as exc:
+        logger.warning("  Offshore marine forecast unavailable: %s", exc)
+        return {}
+
+    lookup: dict[tuple[str, str], dict] = {}
+    forecast_days = int(max(1, min(forecast_days, 7)))
+
+    for city in cities:
+        meta = cities_meta.get(city, {}) if cities_meta else {}
+        offshore = meta.get("offshore", {}) if isinstance(meta, dict) else {}
+        lat = offshore.get("lat", meta.get("lat"))
+        lon = offshore.get("lon", meta.get("lon"))
+        timezone = meta.get("timezone", "auto")
+
+        if lat is None or lon is None:
+            logger.warning("  No offshore coordinates for %s — skipping marine forecast", city)
+            continue
+
+        try:
+            marine_df = fetch_marine_forecast(
+                lat=lat,
+                lon=lon,
+                variables=MARINE_DAILY_VARIABLES,
+                forecast_days=forecast_days,
+                timezone=timezone,
+            )
+
+            if marine_df is None or marine_df.empty:
+                continue
+
+            marine_df = marine_df.reset_index() if "date" not in marine_df.columns else marine_df.copy()
+            marine_df["date"] = pd.to_datetime(marine_df["date"]).dt.date
+
+            for _, row in marine_df.iterrows():
+                info = _offshore_risk_from_row(row)
+                info["offshore_source"] = "marine_forecast"
+                lookup[(city, row["date"].isoformat())] = info
+
+            logger.info("  Offshore marine forecast fetched for %s (%d days)", city, len(marine_df))
+
+        except Exception as exc:
+            logger.warning("  Offshore marine fetch failed for %s: %s", city, exc)
+            continue
+
+    return lookup
+
+
+def _build_offshore_wave_climatology(conn, cities: list[str]) -> dict[tuple[str, int], dict]:
+    """
+    Build fallback offshore sea-risk lookup from historical/proxy wave_height.
+
+    The analytics table should contain wave_height from the SMB fetch-limited
+    proxy. This turns that project-specific maritime feature into a daily
+    climatological offshore risk adjustment for dates beyond the marine forecast.
+    """
+    try:
+        df = conn.execute("""
+            SELECT city, date, wave_height
+            FROM analytics.daily_enriched
+            WHERE wave_height IS NOT NULL
+            ORDER BY city, date
+        """).fetchdf()
+    except Exception as exc:
+        logger.warning("  Could not build offshore wave climatology: %s", exc)
+        return {}
+
+    if df is None or df.empty:
+        logger.warning("  No historical wave_height available for offshore climatology")
+        return {}
+
+    df = df[df["city"].isin(cities)].copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df["day_of_year"] = df["date"].dt.dayofyear.astype(int)
+
+    probs = []
+    for _, row in df.iterrows():
+        info = _offshore_risk_from_row(row)
+        probs.append(info["offshore_sea_probability"])
+    df["offshore_sea_probability"] = probs
+
+    grouped = (
+        df.groupby(["city", "day_of_year"])
+          .agg(
+              offshore_sea_probability=("offshore_sea_probability", "mean"),
+              offshore_wave_height_m=("wave_height", "mean"),
+          )
+          .reset_index()
+    )
+
+    lookup: dict[tuple[str, int], dict] = {}
+    for _, row in grouped.iterrows():
+        lookup[(row["city"], int(row["day_of_year"]))] = {
+            "offshore_sea_probability": round(float(row["offshore_sea_probability"]), 4),
+            "offshore_driver": "historical offshore wave exposure",
+            "offshore_wave_height_m": round(float(row["offshore_wave_height_m"]), 2),
+            "offshore_source": "wave_climatology",
+        }
+
+    logger.info("  Built offshore wave climatology with %d city/day entries", len(lookup))
+    return lookup
+
+
+def _offshore_info_for_day(city: str,
+                           d: date,
+                           live_lookup: dict[tuple[str, str], dict],
+                           clim_lookup: dict[tuple[str, int], dict]) -> dict:
+    """Return offshore sea-state info for one city/date."""
+    key_live = (city, d.isoformat())
+    if key_live in live_lookup:
+        return live_lookup[key_live]
+
+    key_clim = (city, int(d.timetuple().tm_yday))
+    if key_clim in clim_lookup:
+        return clim_lookup[key_clim]
+
+    return {
+        "offshore_sea_probability": 0.0,
+        "offshore_driver": "offshore sea-state data unavailable",
+        "offshore_wave_height_m": np.nan,
+        "offshore_source": "not_available",
+    }
+
+
+def _build_risk_reason(reason_row,
+                       source: str,
+                       port_weather_probability: float,
+                       offshore_info: dict,
+                       adjusted_probability: float,
+                       threshold: float) -> str:
+    """Build a compact explanation for the adjusted maritime-risk row."""
+    src = (source or "").lower()
+    drivers = []
+
+    offshore_prob = float(offshore_info.get("offshore_sea_probability", 0.0) or 0.0)
+    offshore_driver = offshore_info.get("offshore_driver", "")
+    wave = offshore_info.get("offshore_wave_height_m", np.nan)
+
+    if offshore_prob >= 0.25 and offshore_driver and offshore_driver != "offshore sea-state data unavailable":
+        if pd.notna(wave):
+            drivers.append(f"{offshore_driver} ({wave:.2f}m wave estimate)")
+        else:
+            drivers.append(offshore_driver)
+
+    if "climatology" in src:
+        if not drivers:
+            drivers.append("historical city/date risk pattern")
+    else:
+        wind = _safe_float(reason_row, "wind_speed_10m_max")
+        gust = _safe_float(reason_row, "wind_gusts_10m_max")
+        precip = _safe_float(reason_row, "precipitation_sum")
+        snow = _safe_float(reason_row, "snowfall_sum")
+        visibility_mean = _safe_float(reason_row, "visibility_mean")
+        visibility_min = _safe_float(reason_row, "visibility_min")
+
+        if gust is not None and gust >= 75:
+            drivers.append("strong wind gusts")
+        elif wind is not None and wind >= 50:
+            drivers.append("high wind")
+
+        if precip is not None and precip >= 15:
+            drivers.append("heavy precipitation")
+
+        if snow is not None and snow >= 5:
+            drivers.append("snowfall")
+
+        if visibility_min is not None and visibility_min <= 500:
+            drivers.append("very low visibility")
+        elif visibility_mean is not None and visibility_mean <= 1000:
+            drivers.append("low visibility")
+
+    if drivers:
+        # Preserve order but remove duplicates.
+        unique = []
+        for dvr in drivers:
+            if dvr not in unique:
+                unique.append(dvr)
+        return ", ".join(unique[:3])
+
+    if adjusted_probability >= threshold and port_weather_probability >= threshold:
+        return "model signal from recent weather trends"
+
+    if adjusted_probability >= threshold and offshore_prob > 0:
+        return "offshore sea-state adjustment raised the risk"
+
+    return "no major maritime risk driver"
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. Predict — orchestrates short_horizon model + climatology
 # ══════════════════════════════════════════════════════════════════════════════
@@ -595,7 +1470,7 @@ def predict_next_month(
     Returns
     -------
     daily_df : DataFrame with columns
-        city, date, day_of_month, probability, prediction, source
+        city, date, day_of_month, port_weather_probability, offshore_sea_probability, uncalibrated_maritime_probability, probability, probability_calibrated, prediction, source, offshore_source, risk_reason
     monthly_df : DataFrame with columns
         city, target_month, risk_days_predicted,
         high_risk_month_probability, n_short_horizon_days, n_climatology_days
@@ -670,12 +1545,21 @@ def predict_next_month(
             lookback_days=7,
         )
 
+    # Maritime-specific adjustment: live offshore marine forecast where available,
+    # historical/proxy wave climatology for the rest of the rolling window.
+    offshore_live_lookup = _try_fetch_offshore_marine_forecast(
+        cities=cities,
+        cities_meta=CITIES,
+        forecast_days=min(7, len(target_dates)),
+    )
+    offshore_clim_lookup = _build_offshore_wave_climatology(conn, cities)
 
     # Build the full prediction DataFrame
     rows = []
     for city in cities:
         for d in target_dates:
             day_of_year = d.timetuple().tm_yday
+            fc_row = pd.DataFrame()
 
             # Decide source
             use_short_horizon = (
@@ -717,13 +1601,53 @@ def predict_next_month(
                 p = clim.predict_proba(city, day_of_year)
                 src = "climatology"
 
+            port_weather_probability = float(np.clip(p, 0.0, 1.0))
+            offshore_info = _offshore_info_for_day(
+                city=city,
+                d=d,
+                live_lookup=offshore_live_lookup,
+                clim_lookup=offshore_clim_lookup,
+            )
+            offshore_sea_probability = float(
+                offshore_info.get("offshore_sea_probability", 0.0) or 0.0
+            )
+            uncalibrated_maritime_probability = _adjust_maritime_probability(
+                port_weather_probability=port_weather_probability,
+                offshore_sea_probability=offshore_sea_probability,
+            )
+            adjusted_probability = _calibrate_maritime_probability(
+                probability=uncalibrated_maritime_probability,
+                model_bundle=model_bundle,
+            )
+
+            reason_row = fc_row.iloc[0] if len(fc_row) > 0 else pd.Series(dtype="object")
+            risk_reason = _build_risk_reason(
+                reason_row=reason_row,
+                source=src,
+                port_weather_probability=port_weather_probability,
+                offshore_info=offshore_info,
+                adjusted_probability=adjusted_probability,
+                threshold=threshold,
+            )
+
             rows.append({
-                "city":         city,
-                "date":         d.isoformat(),
+                "city": city,
+                "date": d.isoformat(),
                 "day_of_month": d.day,
-                "probability":  round(p, 4),
-                "prediction":   int(p >= threshold),
-                "source":       src,
+                "port_weather_probability": round(port_weather_probability, 4),
+                "offshore_sea_probability": round(offshore_sea_probability, 4),
+                "uncalibrated_maritime_probability": round(uncalibrated_maritime_probability, 4),
+                "probability": round(adjusted_probability, 4),
+                "probability_calibrated": int(
+                    isinstance(model_bundle, dict)
+                    and model_bundle.get("maritime_probability_calibrator") is not None
+                ),
+                "prediction": int(adjusted_probability >= threshold),
+                "source": src,
+                "offshore_source": offshore_info.get("offshore_source", "not_available"),
+                "offshore_driver": offshore_info.get("offshore_driver", ""),
+                "offshore_wave_height_m": offshore_info.get("offshore_wave_height_m", np.nan),
+                "risk_reason": risk_reason,
             })
 
     daily_df = pd.DataFrame(rows).sort_values(["city", "date"]).reset_index(drop=True)

@@ -385,6 +385,131 @@ def stage_features(conn, dry_run: bool = False) -> dict:
     return result
 
 
+
+def _read_day8_selected_model() -> Optional[str]:
+    """
+    Read the Day 8-selected production model.
+
+    Priority:
+      1. reports/day08_model_comparison.csv row with Selected=True
+      2. models/daily_model.pkl saved by Day 8
+      3. repair old CSVs by choosing the best row using the same production score
+
+    This keeps Day 5 from running a separate model-selection contest while still
+    recovering gracefully if an older Day 8 notebook wrote the CSV without a
+    Selected column.
+    """
+    log = logging.getLogger("stage.train")
+    comparison_path = PATHS["repo_root"] / "reports" / "day08_model_comparison.csv"
+    model_path = PATHS["models"] / "daily_model.pkl"
+
+    comparison = None
+    if comparison_path.exists():
+        try:
+            comparison = pd.read_csv(comparison_path)
+        except Exception as exc:
+            log.warning("Could not read Day 8 comparison report %s: %s", comparison_path, exc)
+            comparison = None
+
+    # 1) Normal path: Day 8 wrote Selected=True.
+    if comparison is not None and "Model" in comparison.columns and "Selected" in comparison.columns:
+        selected_mask = comparison["Selected"].astype(str).str.lower().isin(
+            ["true", "1", "yes", "selected"]
+        )
+        selected = comparison[selected_mask]
+        if not selected.empty:
+            return str(selected.iloc[0]["Model"])
+
+    # 2) If the CSV is missing Selected=True but Day 8 saved daily_model.pkl,
+    # use the saved model name as the Day 8 winner and repair the CSV.
+    if model_path.exists():
+        try:
+            import pickle
+            with model_path.open("rb") as f:
+                bundle = pickle.load(f)
+            saved_name = bundle.get("model_name")
+            if saved_name:
+                saved_name = str(saved_name)
+                log.warning(
+                    "Day 8 report has no Selected=True row. Using saved production pickle winner: %s",
+                    saved_name,
+                )
+                if comparison is not None and "Model" in comparison.columns:
+                    matches = comparison[comparison["Model"].astype(str) == saved_name]
+                    if matches.empty:
+                        norm_saved = saved_name.lower().replace(" ", "").replace("-", "_")
+                        norm_col = (
+                            comparison["Model"].astype(str)
+                            .str.lower()
+                            .str.replace(" ", "", regex=False)
+                            .str.replace("-", "_", regex=False)
+                        )
+                        matches = comparison[norm_col == norm_saved]
+                    if not matches.empty:
+                        comparison["Selected"] = False
+                        comparison.loc[matches.index[0], "Selected"] = True
+                        comparison.to_csv(comparison_path, index=False)
+                        log.info("Repaired Day 8 report by marking %s as Selected=True", saved_name)
+                return saved_name
+        except Exception as exc:
+            log.warning("Could not read saved production model %s: %s", model_path, exc)
+
+    # 3) Last-resort repair for old CSVs: compute the same production score from
+    # the report and mark the winner. This only happens when both Selected=True
+    # and the saved Day 8 pickle are unavailable.
+    if comparison is not None and "Model" in comparison.columns:
+        try:
+            production = comparison[comparison["Model"].astype(str) != "Climatology"].copy()
+            if production.empty:
+                return None
+
+            if "Climatology" in set(comparison["Model"].astype(str)):
+                baseline = comparison[comparison["Model"].astype(str) == "Climatology"].iloc[0]
+                baseline_f1 = float(baseline.get("F1", 0.0))
+                baseline_auc = float(baseline.get("ROC-AUC", 0.0))
+                baseline_brier = float(baseline.get("Brier", 1.0))
+            else:
+                baseline_f1, baseline_auc, baseline_brier = 0.0, 0.0, 1.0
+
+            production["Eligible"] = (
+                (production["F1"].astype(float) >= baseline_f1) &
+                (production["ROC-AUC"].astype(float) >= baseline_auc) &
+                (production["Brier"].astype(float) <= baseline_brier + 0.005) &
+                (production["Recall"].astype(float) >= 0.25)
+            )
+            production["Production score"] = (
+                0.35 * production["F1"].astype(float) +
+                0.20 * production["Recall"].astype(float) +
+                0.20 * production["ROC-AUC"].astype(float) +
+                0.25 * (1.0 - production["Brier"].astype(float))
+            )
+            eligible = production[production["Eligible"]].copy()
+            if eligible.empty:
+                eligible = production.copy()
+            winner = eligible.sort_values(
+                ["Production score", "Brier", "F1", "Recall"],
+                ascending=[False, True, False, False],
+            ).iloc[0]
+            winner_name = str(winner["Model"])
+
+            comparison["Selected"] = False
+            comparison.loc[comparison["Model"].astype(str) == winner_name, "Selected"] = True
+            comparison.to_csv(comparison_path, index=False)
+            log.warning(
+                "Day 8 report had no Selected=True row and no usable pickle. Repaired report using production score: %s",
+                winner_name,
+            )
+            return winner_name
+        except Exception as exc:
+            log.warning("Could not repair Day 8 selection from report: %s", exc)
+
+    log.warning(
+        "No Day 8 selected model could be found. train_model() will use its internal selector. "
+        "Run Day 8 first for the intended workflow."
+    )
+    return None
+
+
 def stage_train(conn, model_path: Path, climatology_path: Path,
                 dry_run: bool = False) -> dict:
     log = logging.getLogger("stage.train")
@@ -393,7 +518,17 @@ def stage_train(conn, model_path: Path, climatology_path: Path,
     if dry_run:
         return {"rows_trained": 0, "model_path": str(model_path)}
 
-    train_metrics = train_model(conn, model_path=model_path)
+    preferred_model = _read_day8_selected_model()
+    if preferred_model:
+        log.info("  Day 8 selected model: %s", preferred_model)
+    else:
+        log.info("  No Day 8 selected model found; using train_model() internal selector")
+
+    train_metrics = train_model(
+        conn,
+        model_path=model_path,
+        preferred_model=preferred_model,
+    )
     clim_info     = build_climatology(conn, climatology_path=climatology_path)
     log.info("  Train: %s", train_metrics)
     log.info("  Climatology: %s", clim_info)

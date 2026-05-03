@@ -1,6 +1,10 @@
-Model,Accuracy,F1,ROC-AUC,Brier,F1 CI width,AUC CI width,Notes
-Climatology,0.915,0.013,0.662,0.078,0.04,0.085,"Naive baseline: per-(city,doy) historical rate"
-LogisticRegression,0.683,0.291,0.801,0.209,0.08,0.062,Linear; interpretable coefficients
-XGBoost,0.745,0.285,0.738,0.182,0.094,0.074,Tree ensemble; non-linear; regularised
-LogisticRegression_calibrated,0.912,0.13,0.798,0.071,0.127,0.064,Logistic Regression with isotonic probability calibration
-XGBoost_calibrated,0.914,0.048,0.742,0.074,0.083,0.074,Tree model with isotonic probability calibration
+Model,Threshold,Accuracy,Precision,Recall,F1,ROC-AUC,Brier,Predicted positive rate,F1 CI width,AUC CI width,Notes,Selected
+Climatology,0.01,0.579,0.135,0.724,0.227,0.662,0.078,0.459,0.068,0.085,"Naive baseline: per-(city,doy) historical rate | threshold tuned for F1",False
+LogisticRegression,0.58,0.756,0.214,0.699,0.328,0.798,0.209,0.278,0.094,0.064,Linear; interpretable coefficients | threshold tuned for F1,False
+XGBoost,0.56,0.789,0.203,0.506,0.29,0.742,0.178,0.213,0.1,0.074,Tree boosting model; non-linear; regularised | threshold tuned for F1,False
+RandomForest,0.25,0.839,0.241,0.41,0.303,0.77,0.077,0.145,0.109,0.067,Bagged decision trees; non-linear interactions | threshold tuned for F1,False
+ExtraTrees,0.41,0.819,0.229,0.474,0.309,0.792,0.103,0.177,0.104,0.059,Extremely randomized trees; strong non-linear baseline | threshold tuned for F1,False
+LogisticRegression_calibrated,0.11,0.779,0.219,0.622,0.324,0.798,0.072,0.242,0.099,0.063,Logistic Regression with sigmoid probability calibration | threshold tuned for F1,True
+XGBoost_calibrated,0.11,0.793,0.203,0.487,0.286,0.742,0.074,0.205,0.102,0.073,Boosting model with sigmoid probability calibration | threshold tuned for F1,False
+RandomForest_calibrated,0.02,0.903,0.348,0.154,0.213,0.77,0.086,0.038,0.144,0.068,RandomForest with sigmoid probability calibration | threshold tuned for F1,False
+ExtraTrees_calibrated,0.01,0.895,0.287,0.16,0.206,0.792,0.084,0.048,0.137,0.066,ExtraTrees with sigmoid probability calibration | threshold tuned for F1,False

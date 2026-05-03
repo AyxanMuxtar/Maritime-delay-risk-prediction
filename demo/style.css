@@ -618,3 +618,114 @@ body.modal-open {
     display: none;
   }
 }
+
+/* About page / navigation */
+.hero-actions {
+  margin-top: 22px;
+}
+
+.nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: #8fb8e8;
+  color: #101216;
+  font-weight: 800;
+  text-decoration: none;
+  border: 1px solid rgba(143, 184, 232, 0.65);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.nav-button:hover {
+  filter: brightness(1.05);
+}
+
+.nav-button.secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.top-nav {
+  margin-bottom: 28px;
+}
+
+.about-page {
+  max-width: 980px;
+}
+
+.about-hero {
+  margin-bottom: 28px;
+}
+
+.about-panel,
+.about-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.about-panel {
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.about-panel p,
+.about-card p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.about-card {
+  padding: 20px;
+}
+
+.about-card .label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+
+.about-card h2 {
+  font-size: 1.25rem;
+  margin-bottom: 8px;
+}
+
+.about-steps {
+  display: grid;
+  gap: 16px;
+}
+
+.about-steps strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 760px) {
+  .about-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.source-panel .nav-button {
+  margin-top: 4px;
+}
+
+.about-panel p + p {
+  margin-top: 10px;
+}

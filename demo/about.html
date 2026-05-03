@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About · Caspian Maritime Delay-Risk Forecast</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page about-page">
+    <nav class="top-nav">
+      <a class="nav-button secondary" href="index.html">← Back to forecast</a>
+    </nav>
+
+    <header class="about-hero">
+      <p class="eyebrow">About the project</p>
+      <h1>Caspian Maritime Delay-Risk Forecast</h1>
+      <p class="subtitle">
+        A daily decision-support dashboard for estimating weather-driven maritime delay risk across major Caspian ports.
+      </p>
+    </header>
+
+    <section class="about-panel">
+      <h2>What this product does</h2>
+      <p>
+        Maritime operations can be disrupted by strong wind, dangerous gusts, heavy precipitation, fog, snowfall, and rough sea conditions. This dashboard turns those weather and sea-state signals into readable risk levels for Baku, Aktau, Anzali, Turkmenbashi, and Makhachkala.
+      </p>
+      <p>
+        The goal is not to predict confirmed port closures. Instead, the system gives planners an early warning signal: which port-days deserve normal operation, monitoring, caution, manual review, or postponement.
+      </p>
+    </section>
+
+    <section class="about-grid">
+      <article class="about-card">
+        <span class="label">Coverage</span>
+        <h2>Five Caspian ports</h2>
+        <p>Baku, Aktau, Anzali, Makhachkala, and Turkmenbashi.</p>
+      </article>
+
+      <article class="about-card">
+        <span class="label">Forecast window</span>
+        <h2>Rolling 30 days</h2>
+        <p>The calendar updates daily and always shows the next operating window.</p>
+      </article>
+
+      <article class="about-card">
+        <span class="label">Output</span>
+        <h2>Risk + action</h2>
+        <p>Each day is shown as Low, Moderate, High, Very High, or Severe with a recommended response.</p>
+      </article>
+    </section>
+
+    <section class="about-panel">
+      <h2>How it works</h2>
+      <div class="about-steps">
+        <div>
+          <strong>Data and pipeline</strong>
+          <p>
+            Weather data comes from Open-Meteo and is stored in a DuckDB pipeline with raw, staging, and analytics layers. The pipeline handles missing values, visibility coverage limits, outlier flags, date checks, and automated quality gates.
+          </p>
+        </div>
+        <div>
+          <strong>Features</strong>
+          <p>
+            The system builds seasonal, rolling, lag, anomaly, visibility, and wave-proxy features. Historical wave height is estimated from wind and port exposure, giving the project a maritime-specific signal beyond a normal weather forecast.
+          </p>
+        </div>
+        <div>
+          <strong>Model and forecast</strong>
+          <p>
+            The selected production model is chosen in the Day 8 modeling workflow, then retrained by the pipeline on the latest analytics data. Forecast-based days use live weather inputs; later dates fall back to smoothed city/day-of-year climatology.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="about-panel">
+      <h2>What counts as a risky day</h2>
+      <p>
+        A day becomes risky when at least one maritime threshold is breached: strong sustained wind, dangerous gusts, heavy precipitation, snowfall, low visibility/fog, or high wave conditions. The website shows both the final risk estimate and the key conditions behind it when a day is clicked.
+      </p>
+    </section>
+
+    <section class="about-panel">
+      <h2>Limitations</h2>
+      <p>
+        The forecast is a planning signal, not a guarantee of actual delay. Visibility data is only directly available from 2022 onward, older visibility rows are handled through imputation and flags, and historical sea-state is estimated with a wave proxy rather than direct measured wave observations.
+      </p>
+    </section>
+
+    <section class="about-panel source-panel">
+      <h2>Source code</h2>
+      <p>
+        The full project includes notebooks, pipeline scripts, model training, quality checks, prediction outputs, and the website demo.
+      </p>
+      <a class="nav-button" href="https://github.com/AyxanMuxtar/Maritime-delay-risk-prediction" target="_blank" rel="noopener noreferrer">
+        Source repository →
+      </a>
+    </section>
+  </main>
+</body>
+</html>

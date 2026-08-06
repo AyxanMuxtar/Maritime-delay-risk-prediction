@@ -1,6 +1,6 @@
 city,window_start,window_end,risk_days_predicted,high_risk_window_probability,n_short_horizon_days,n_climatology_days
-Aktau,2026-08-05,2026-09-04,0,0.0032,16,15
-Anzali,2026-08-05,2026-09-04,3,0.0672,16,15
-Baku,2026-08-05,2026-09-04,5,0.098,16,15
-Makhachkala,2026-08-05,2026-09-04,2,0.07,16,15
-Turkmenbashi,2026-08-05,2026-09-04,0,0.0012,16,15
+Aktau,2026-08-06,2026-09-05,0,0.0034,16,15
+Anzali,2026-08-06,2026-09-05,5,0.101,16,15
+Baku,2026-08-06,2026-09-05,5,0.1042,16,15
+Makhachkala,2026-08-06,2026-09-05,2,0.0704,16,15
+Turkmenbashi,2026-08-06,2026-09-05,0,0.0008,16,15

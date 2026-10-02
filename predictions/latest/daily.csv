@@ -1,21 +1,20 @@
 city,date,day_of_month,port_weather_probability,offshore_sea_probability,uncalibrated_maritime_probability,probability,probability_calibrated,prediction,source,offshore_source,offshore_driver,offshore_wave_height_m,risk_reason
-Aktau,2026-10-01,1,0.0155,0.0036,0.0171,0.0171,0,0,short_horizon,marine_forecast,offshore wave height,0.22,no major maritime risk driver
-Aktau,2026-10-02,2,0.035,0.0283,0.0473,0.0473,0,0,short_horizon,marine_forecast,wind-wave height,0.94,no major maritime risk driver
-Aktau,2026-10-03,3,0.0307,0.0502,0.0526,0.0526,0,0,short_horizon,marine_forecast,swell height,1.28,no major maritime risk driver
-Aktau,2026-10-04,4,0.0465,0.0776,0.0798,0.0798,0,0,short_horizon,marine_forecast,wind-wave height,1.44,no major maritime risk driver
-Aktau,2026-10-05,5,0.0199,0.0173,0.0276,0.0276,0,0,short_horizon,marine_forecast,swell height,0.82,no major maritime risk driver
-Aktau,2026-10-06,6,0.0289,0.0275,0.0409,0.0409,0,0,short_horizon,marine_forecast,swell height,0.94,no major maritime risk driver
-Aktau,2026-10-07,7,0.0614,0.0275,0.073,0.073,0,0,short_horizon,marine_forecast,swell height,0.84,no major maritime risk driver
-Aktau,2026-10-08,8,0.0368,0.1088,0.0839,0.0839,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.29,no major maritime risk driver
-Aktau,2026-10-09,9,0.0278,0.0704,0.0586,0.0586,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.22,no major maritime risk driver
-Aktau,2026-10-10,10,0.0183,0.0572,0.0436,0.0436,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.05,no major maritime risk driver
-Aktau,2026-10-11,11,0.0252,0.0538,0.0488,0.0488,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
-Aktau,2026-10-12,12,0.0445,0.0617,0.071,0.071,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
-Aktau,2026-10-13,13,0.0634,0.067,0.0917,0.0917,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.19,no major maritime risk driver
-Aktau,2026-10-14,14,0.0538,0.0402,0.0709,0.0709,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.01,no major maritime risk driver
-Aktau,2026-10-15,15,0.3595,0.0191,0.365,0.365,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.8,heavy precipitation
-Aktau,2026-10-16,16,0.0226,0.0791,0.0574,0.0574,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.0,no major maritime risk driver
-Aktau,2026-10-17,17,0.0121,0.0602,0.0389,0.0389,0,0,climatology,wave_climatology,historical offshore wave exposure,1.14,historical city/date risk pattern
+Aktau,2026-10-02,2,0.0382,0.0199,0.0468,0.0468,0,0,short_horizon,marine_forecast,wind-wave height,0.82,no major maritime risk driver
+Aktau,2026-10-03,3,0.0268,0.0317,0.0407,0.0407,0,0,short_horizon,marine_forecast,wind-wave height,1.04,no major maritime risk driver
+Aktau,2026-10-04,4,0.0532,0.0959,0.0941,0.0941,0,0,short_horizon,marine_forecast,wind-wave height,1.44,no major maritime risk driver
+Aktau,2026-10-05,5,0.021,0.0275,0.0331,0.0331,0,0,short_horizon,marine_forecast,swell height,0.84,no major maritime risk driver
+Aktau,2026-10-06,6,0.02,0.0373,0.0365,0.0365,0,0,short_horizon,marine_forecast,swell height,1.04,no major maritime risk driver
+Aktau,2026-10-07,7,0.0461,0.0373,0.0621,0.0621,0,0,short_horizon,marine_forecast,swell height,0.96,no major maritime risk driver
+Aktau,2026-10-08,8,0.0399,0.0092,0.0439,0.0439,0,0,short_horizon,marine_forecast,swell height,0.48,no major maritime risk driver
+Aktau,2026-10-09,9,0.0268,0.0704,0.0576,0.0576,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.22,no major maritime risk driver
+Aktau,2026-10-10,10,0.0316,0.0572,0.0565,0.0565,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.05,no major maritime risk driver
+Aktau,2026-10-11,11,0.0332,0.0538,0.0566,0.0566,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
+Aktau,2026-10-12,12,0.0304,0.0617,0.0573,0.0573,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
+Aktau,2026-10-13,13,0.0275,0.067,0.0568,0.0568,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.19,no major maritime risk driver
+Aktau,2026-10-14,14,0.1246,0.0402,0.1404,0.1404,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.01,heavy precipitation
+Aktau,2026-10-15,15,0.0607,0.0191,0.0687,0.0687,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.8,no major maritime risk driver
+Aktau,2026-10-16,16,0.0906,0.0791,0.123,0.123,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.0,offshore sea-state adjustment raised the risk
+Aktau,2026-10-17,17,0.0432,0.0602,0.0691,0.0691,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.14,no major maritime risk driver
 Aktau,2026-10-18,18,0.0121,0.0274,0.0243,0.0243,0,0,climatology,wave_climatology,historical offshore wave exposure,0.91,historical city/date risk pattern
 Aktau,2026-10-19,19,0.0182,0.0754,0.0515,0.0515,0,0,climatology,wave_climatology,historical offshore wave exposure,1.2,historical city/date risk pattern
 Aktau,2026-10-20,20,0.0242,0.1031,0.0695,0.0695,0,0,climatology,wave_climatology,historical offshore wave exposure,1.36,historical city/date risk pattern
@@ -30,23 +29,23 @@ Aktau,2026-10-28,28,0.0545,0.0246,0.065,0.065,0,0,climatology,wave_climatology,h
 Aktau,2026-10-29,29,0.0545,0.0489,0.0754,0.0754,0,0,climatology,wave_climatology,historical offshore wave exposure,1.19,historical city/date risk pattern
 Aktau,2026-10-30,30,0.0606,0.052,0.0826,0.0826,0,0,climatology,wave_climatology,historical offshore wave exposure,0.93,historical city/date risk pattern
 Aktau,2026-10-31,31,0.0667,0.0885,0.1038,0.1038,0,0,climatology,wave_climatology,historical offshore wave exposure,1.32,historical city/date risk pattern
-Anzali,2026-10-01,1,0.0464,0.0275,0.0582,0.0582,0,0,short_horizon,marine_forecast,swell height,0.72,no major maritime risk driver
-Anzali,2026-10-02,2,0.0574,0.0039,0.059,0.059,0,0,short_horizon,marine_forecast,swell height,0.22,no major maritime risk driver
-Anzali,2026-10-03,3,0.1289,0.5172,0.3316,0.3316,0,1,short_horizon,marine_forecast,swell height,2.0,swell height (2.00m wave estimate)
-Anzali,2026-10-04,4,0.0671,0.3791,0.2263,0.2263,0,1,short_horizon,marine_forecast,swell height,1.5,swell height (1.50m wave estimate)
-Anzali,2026-10-05,5,0.0704,0.0345,0.0848,0.0848,0,0,short_horizon,marine_forecast,swell height,0.92,no major maritime risk driver
-Anzali,2026-10-06,6,0.0695,0.016,0.0762,0.0762,0,0,short_horizon,marine_forecast,swell height,0.58,no major maritime risk driver
-Anzali,2026-10-07,7,0.0574,0.0067,0.0602,0.0602,0,0,short_horizon,marine_forecast,swell height,0.36,no major maritime risk driver
-Anzali,2026-10-08,8,0.059,0.0107,0.0636,0.0636,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.46,no major maritime risk driver
-Anzali,2026-10-09,9,0.0551,0.0054,0.0574,0.0574,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.34,no major maritime risk driver
-Anzali,2026-10-10,10,0.0712,0.0119,0.0762,0.0762,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.57,no major maritime risk driver
-Anzali,2026-10-11,11,0.0711,0.0095,0.0751,0.0751,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.45,no major maritime risk driver
-Anzali,2026-10-12,12,0.1096,0.0083,0.1129,0.1129,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.47,offshore sea-state adjustment raised the risk
-Anzali,2026-10-13,13,0.0987,0.0253,0.109,0.109,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.69,no major maritime risk driver
-Anzali,2026-10-14,14,0.057,0.0075,0.0601,0.0601,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.43,no major maritime risk driver
-Anzali,2026-10-15,15,0.2931,0.0124,0.297,0.297,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.54,heavy precipitation
-Anzali,2026-10-16,16,0.063,0.0416,0.0805,0.0805,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.64,no major maritime risk driver
-Anzali,2026-10-17,17,0.2667,0.0102,0.27,0.27,0,1,climatology,wave_climatology,historical offshore wave exposure,0.51,historical city/date risk pattern
+Aktau,2026-11-01,1,0.0667,0.1133,0.1143,0.1143,0,1,climatology,wave_climatology,historical offshore wave exposure,1.3,historical city/date risk pattern
+Anzali,2026-10-02,2,0.154,0.0039,0.1555,0.1555,0,1,short_horizon,marine_forecast,swell height,0.22,model signal from recent weather trends
+Anzali,2026-10-03,3,0.241,0.5285,0.4215,0.4215,0,1,short_horizon,marine_forecast,swell height,2.08,swell height (2.08m wave estimate)
+Anzali,2026-10-04,4,0.1022,0.2991,0.2231,0.2231,0,1,short_horizon,marine_forecast,swell height,1.5,"swell height (1.50m wave estimate), heavy precipitation"
+Anzali,2026-10-05,5,0.0641,0.0402,0.0811,0.0811,0,0,short_horizon,marine_forecast,swell height,0.92,no major maritime risk driver
+Anzali,2026-10-06,6,0.0743,0.0085,0.0779,0.0779,0,0,short_horizon,marine_forecast,swell height,0.58,no major maritime risk driver
+Anzali,2026-10-07,7,0.07,0.0084,0.0735,0.0735,0,0,short_horizon,marine_forecast,offshore wave height,0.58,no major maritime risk driver
+Anzali,2026-10-08,8,0.048,0.0043,0.0498,0.0498,0,0,short_horizon,marine_forecast,offshore wave height,0.3,no major maritime risk driver
+Anzali,2026-10-09,9,0.0691,0.0054,0.0714,0.0714,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.34,no major maritime risk driver
+Anzali,2026-10-10,10,0.0695,0.0119,0.0745,0.0745,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.57,no major maritime risk driver
+Anzali,2026-10-11,11,0.0554,0.0095,0.0595,0.0595,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.45,no major maritime risk driver
+Anzali,2026-10-12,12,0.0603,0.0083,0.0638,0.0638,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.47,no major maritime risk driver
+Anzali,2026-10-13,13,0.0741,0.0253,0.0846,0.0846,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.69,no major maritime risk driver
+Anzali,2026-10-14,14,0.086,0.0075,0.0891,0.0891,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.43,no major maritime risk driver
+Anzali,2026-10-15,15,0.1612,0.0124,0.1659,0.1659,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.54,heavy precipitation
+Anzali,2026-10-16,16,0.0536,0.0416,0.0713,0.0713,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.64,no major maritime risk driver
+Anzali,2026-10-17,17,0.0863,0.0102,0.0905,0.0905,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.51,no major maritime risk driver
 Anzali,2026-10-18,18,0.2667,0.03,0.2766,0.2766,0,1,climatology,wave_climatology,historical offshore wave exposure,0.58,historical city/date risk pattern
 Anzali,2026-10-19,19,0.2788,0.015,0.2837,0.2837,0,1,climatology,wave_climatology,historical offshore wave exposure,0.52,historical city/date risk pattern
 Anzali,2026-10-20,20,0.2606,0.0122,0.2647,0.2647,0,1,climatology,wave_climatology,historical offshore wave exposure,0.56,historical city/date risk pattern
@@ -61,23 +60,23 @@ Anzali,2026-10-28,28,0.2667,0.0096,0.2698,0.2698,0,1,climatology,wave_climatolog
 Anzali,2026-10-29,29,0.2727,0.0066,0.2749,0.2749,0,1,climatology,wave_climatology,historical offshore wave exposure,0.42,historical city/date risk pattern
 Anzali,2026-10-30,30,0.2485,0.0095,0.2517,0.2517,0,1,climatology,wave_climatology,historical offshore wave exposure,0.51,historical city/date risk pattern
 Anzali,2026-10-31,31,0.2606,0.0104,0.2641,0.2641,0,1,climatology,wave_climatology,historical offshore wave exposure,0.41,historical city/date risk pattern
-Baku,2026-10-01,1,0.0274,0.0031,0.0288,0.0288,0,0,short_horizon,marine_forecast,offshore wave height,0.16,no major maritime risk driver
-Baku,2026-10-02,2,0.1941,0.0283,0.2043,0.2043,0,1,short_horizon,marine_forecast,wind-wave height,0.92,strong wind gusts
-Baku,2026-10-03,3,0.1303,0.0317,0.1427,0.1427,0,1,short_horizon,marine_forecast,wind-wave height,0.96,model signal from recent weather trends
-Baku,2026-10-04,4,0.0423,0.0087,0.046,0.046,0,0,short_horizon,marine_forecast,wind-wave height,0.54,no major maritime risk driver
-Baku,2026-10-05,5,0.0604,0.0045,0.0623,0.0623,0,0,short_horizon,marine_forecast,swell height,0.26,no major maritime risk driver
-Baku,2026-10-06,6,0.1239,0.0085,0.1273,0.1273,0,1,short_horizon,marine_forecast,swell height,0.48,model signal from recent weather trends
-Baku,2026-10-07,7,0.0601,0.0057,0.0625,0.0625,0,0,short_horizon,marine_forecast,swell height,0.34,no major maritime risk driver
-Baku,2026-10-08,8,0.0888,0.0863,0.1242,0.1242,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.99,offshore sea-state adjustment raised the risk
-Baku,2026-10-09,9,0.0694,0.2136,0.1589,0.1589,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.35,offshore sea-state adjustment raised the risk
-Baku,2026-10-10,10,0.0855,0.1071,0.1296,0.1296,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.18,offshore sea-state adjustment raised the risk
-Baku,2026-10-11,11,0.0824,0.1928,0.162,0.162,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.4,offshore sea-state adjustment raised the risk
-Baku,2026-10-12,12,0.0848,0.2035,0.1686,0.1686,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.58,offshore sea-state adjustment raised the risk
-Baku,2026-10-13,13,0.0629,0.0595,0.088,0.088,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.03,no major maritime risk driver
-Baku,2026-10-14,14,0.0758,0.0376,0.0914,0.0914,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.83,no major maritime risk driver
-Baku,2026-10-15,15,0.1027,0.0361,0.1173,0.1173,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.95,offshore sea-state adjustment raised the risk
-Baku,2026-10-16,16,0.0664,0.1279,0.1201,0.1201,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.09,offshore sea-state adjustment raised the risk
-Baku,2026-10-17,17,0.097,0.1473,0.1568,0.1568,0,1,climatology,wave_climatology,historical offshore wave exposure,1.33,historical city/date risk pattern
+Anzali,2026-11-01,1,0.2424,0.0237,0.2505,0.2505,0,1,climatology,wave_climatology,historical offshore wave exposure,0.7,historical city/date risk pattern
+Baku,2026-10-02,2,0.2489,0.0267,0.2579,0.2579,0,1,short_horizon,marine_forecast,wind-wave height,0.9,strong wind gusts
+Baku,2026-10-03,3,0.2815,0.0317,0.2918,0.2918,0,1,short_horizon,marine_forecast,wind-wave height,0.96,heavy precipitation
+Baku,2026-10-04,4,0.0761,0.0125,0.0813,0.0813,0,0,short_horizon,marine_forecast,wind-wave height,0.66,no major maritime risk driver
+Baku,2026-10-05,5,0.082,0.0073,0.085,0.085,0,0,short_horizon,marine_forecast,swell height,0.42,no major maritime risk driver
+Baku,2026-10-06,6,0.206,0.0079,0.2088,0.2088,0,1,short_horizon,marine_forecast,swell height,0.46,heavy precipitation
+Baku,2026-10-07,7,0.1215,0.0049,0.1235,0.1235,0,1,short_horizon,marine_forecast,swell height,0.32,model signal from recent weather trends
+Baku,2026-10-08,8,0.1102,0.0031,0.1114,0.1114,0,1,short_horizon,marine_forecast,offshore wave height,0.16,model signal from recent weather trends
+Baku,2026-10-09,9,0.0945,0.2136,0.1816,0.1816,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.35,offshore sea-state adjustment raised the risk
+Baku,2026-10-10,10,0.0747,0.1071,0.1193,0.1193,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.18,offshore sea-state adjustment raised the risk
+Baku,2026-10-11,11,0.0724,0.1928,0.1528,0.1528,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.4,offshore sea-state adjustment raised the risk
+Baku,2026-10-12,12,0.0864,0.2035,0.1701,0.1701,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.58,offshore sea-state adjustment raised the risk
+Baku,2026-10-13,13,0.0827,0.0595,0.1073,0.1073,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.03,no major maritime risk driver
+Baku,2026-10-14,14,0.1216,0.0376,0.1365,0.1365,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.83,model signal from recent weather trends
+Baku,2026-10-15,15,0.0758,0.0361,0.0909,0.0909,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.95,no major maritime risk driver
+Baku,2026-10-16,16,0.0711,0.1279,0.1246,0.1246,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.09,offshore sea-state adjustment raised the risk
+Baku,2026-10-17,17,0.1558,0.1473,0.2117,0.2117,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.33,model signal from recent weather trends
 Baku,2026-10-18,18,0.0909,0.1134,0.1373,0.1373,0,1,climatology,wave_climatology,historical offshore wave exposure,1.15,historical city/date risk pattern
 Baku,2026-10-19,19,0.097,0.1262,0.1483,0.1483,0,1,climatology,wave_climatology,historical offshore wave exposure,1.17,historical city/date risk pattern
 Baku,2026-10-20,20,0.0848,0.06,0.1096,0.1096,0,0,climatology,wave_climatology,historical offshore wave exposure,1.13,historical city/date risk pattern
@@ -92,23 +91,23 @@ Baku,2026-10-28,28,0.1273,0.0321,0.1399,0.1399,0,1,climatology,wave_climatology,
 Baku,2026-10-29,29,0.1212,0.0529,0.1421,0.1421,0,1,climatology,wave_climatology,historical offshore wave exposure,0.95,historical city/date risk pattern
 Baku,2026-10-30,30,0.1273,0.0551,0.1489,0.1489,0,1,climatology,wave_climatology,historical offshore wave exposure,1.02,historical city/date risk pattern
 Baku,2026-10-31,31,0.1273,0.1203,0.1745,0.1745,0,1,climatology,wave_climatology,historical offshore wave exposure,1.32,historical city/date risk pattern
-Makhachkala,2026-10-01,1,0.1964,0.0073,0.199,0.199,0,1,short_horizon,marine_forecast,swell height,0.5,model signal from recent weather trends
-Makhachkala,2026-10-02,2,0.2236,0.0283,0.2335,0.2335,0,1,short_horizon,marine_forecast,wind-wave height,1.0,heavy precipitation
-Makhachkala,2026-10-03,3,0.0464,0.0199,0.055,0.055,0,0,short_horizon,marine_forecast,wind-wave height,0.86,no major maritime risk driver
-Makhachkala,2026-10-04,4,0.0584,0.0079,0.0617,0.0617,0,0,short_horizon,marine_forecast,swell height,0.4,no major maritime risk driver
-Makhachkala,2026-10-05,5,0.0405,0.0034,0.042,0.042,0,0,short_horizon,marine_forecast,offshore wave height,0.2,no major maritime risk driver
-Makhachkala,2026-10-06,6,0.0621,0.0297,0.0746,0.0746,0,0,short_horizon,marine_forecast,swell height,0.78,no major maritime risk driver
-Makhachkala,2026-10-07,7,0.0553,0.0345,0.07,0.07,0,0,short_horizon,marine_forecast,swell height,0.82,no major maritime risk driver
-Makhachkala,2026-10-08,8,0.0837,0.0417,0.1009,0.1009,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
-Makhachkala,2026-10-09,9,0.0605,0.0737,0.0917,0.0917,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
-Makhachkala,2026-10-10,10,0.0651,0.0726,0.0956,0.0956,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.91,no major maritime risk driver
-Makhachkala,2026-10-11,11,0.0705,0.0989,0.1119,0.1119,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.95,offshore sea-state adjustment raised the risk
-Makhachkala,2026-10-12,12,0.0293,0.1,0.073,0.073,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.06,no major maritime risk driver
-Makhachkala,2026-10-13,13,0.0427,0.0576,0.0675,0.0675,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.95,no major maritime risk driver
-Makhachkala,2026-10-14,14,0.0633,0.0545,0.0862,0.0862,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.97,no major maritime risk driver
-Makhachkala,2026-10-15,15,0.06,0.0356,0.0751,0.0751,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.86,strong wind gusts
-Makhachkala,2026-10-16,16,0.0356,0.0239,0.046,0.046,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.81,no major maritime risk driver
-Makhachkala,2026-10-17,17,0.0606,0.0196,0.0689,0.0689,0,0,climatology,wave_climatology,historical offshore wave exposure,0.74,historical city/date risk pattern
+Baku,2026-11-01,1,0.1273,0.2076,0.2088,0.2088,0,1,climatology,wave_climatology,historical offshore wave exposure,1.59,historical city/date risk pattern
+Makhachkala,2026-10-02,2,0.2111,0.0267,0.2205,0.2205,0,1,short_horizon,marine_forecast,wind-wave height,0.94,heavy precipitation
+Makhachkala,2026-10-03,3,0.0544,0.0188,0.0624,0.0624,0,0,short_horizon,marine_forecast,wind-wave height,0.82,no major maritime risk driver
+Makhachkala,2026-10-04,4,0.0583,0.0085,0.0619,0.0619,0,0,short_horizon,marine_forecast,swell height,0.48,no major maritime risk driver
+Makhachkala,2026-10-05,5,0.0391,0.0039,0.0408,0.0408,0,0,short_horizon,marine_forecast,offshore wave height,0.26,no major maritime risk driver
+Makhachkala,2026-10-06,6,0.054,0.0466,0.0738,0.0738,0,0,short_horizon,marine_forecast,swell height,0.96,no major maritime risk driver
+Makhachkala,2026-10-07,7,0.0576,0.0106,0.0621,0.0621,0,0,short_horizon,marine_forecast,offshore wave height,0.68,no major maritime risk driver
+Makhachkala,2026-10-08,8,0.0788,0.005,0.0809,0.0809,0,0,short_horizon,marine_forecast,offshore wave height,0.36,no major maritime risk driver
+Makhachkala,2026-10-09,9,0.0568,0.0737,0.0881,0.0881,0,0,short_horizon,wave_climatology,historical offshore wave exposure,1.15,no major maritime risk driver
+Makhachkala,2026-10-10,10,0.0628,0.0726,0.0935,0.0935,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.91,no major maritime risk driver
+Makhachkala,2026-10-11,11,0.0561,0.0989,0.0981,0.0981,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.95,no major maritime risk driver
+Makhachkala,2026-10-12,12,0.0784,0.1,0.1199,0.1199,0,1,short_horizon,wave_climatology,historical offshore wave exposure,1.06,offshore sea-state adjustment raised the risk
+Makhachkala,2026-10-13,13,0.0609,0.0576,0.0852,0.0852,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.95,no major maritime risk driver
+Makhachkala,2026-10-14,14,0.1515,0.0545,0.1723,0.1723,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.97,heavy precipitation
+Makhachkala,2026-10-15,15,0.0417,0.0356,0.057,0.057,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.86,no major maritime risk driver
+Makhachkala,2026-10-16,16,0.1145,0.0239,0.124,0.124,0,1,short_horizon,wave_climatology,historical offshore wave exposure,0.81,model signal from recent weather trends
+Makhachkala,2026-10-17,17,0.065,0.0196,0.0732,0.0732,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.74,no major maritime risk driver
 Makhachkala,2026-10-18,18,0.0667,0.0231,0.0764,0.0764,0,0,climatology,wave_climatology,historical offshore wave exposure,0.71,historical city/date risk pattern
 Makhachkala,2026-10-19,19,0.0667,0.0145,0.0728,0.0728,0,0,climatology,wave_climatology,historical offshore wave exposure,0.62,historical city/date risk pattern
 Makhachkala,2026-10-20,20,0.0545,0.019,0.0626,0.0626,0,0,climatology,wave_climatology,historical offshore wave exposure,0.6,historical city/date risk pattern
@@ -123,23 +122,23 @@ Makhachkala,2026-10-28,28,0.0667,0.0357,0.0817,0.0817,0,0,climatology,wave_clima
 Makhachkala,2026-10-29,29,0.0667,0.0598,0.0918,0.0918,0,0,climatology,wave_climatology,historical offshore wave exposure,0.64,historical city/date risk pattern
 Makhachkala,2026-10-30,30,0.0788,0.014,0.0846,0.0846,0,0,climatology,wave_climatology,historical offshore wave exposure,0.56,historical city/date risk pattern
 Makhachkala,2026-10-31,31,0.0788,0.0563,0.1021,0.1021,0,0,climatology,wave_climatology,historical offshore wave exposure,0.92,historical city/date risk pattern
-Turkmenbashi,2026-10-01,1,0.0206,0.0036,0.0222,0.0222,0,0,short_horizon,marine_forecast,offshore wave height,0.22,no major maritime risk driver
-Turkmenbashi,2026-10-02,2,0.0322,0.0039,0.0339,0.0339,0,0,short_horizon,marine_forecast,offshore wave height,0.26,no major maritime risk driver
-Turkmenbashi,2026-10-03,3,0.0445,0.0078,0.0479,0.0479,0,0,short_horizon,marine_forecast,wind-wave height,0.52,no major maritime risk driver
-Turkmenbashi,2026-10-04,4,0.0341,0.0073,0.0373,0.0373,0,0,short_horizon,marine_forecast,wind-wave height,0.48,no major maritime risk driver
-Turkmenbashi,2026-10-05,5,0.0264,0.0051,0.0287,0.0287,0,0,short_horizon,marine_forecast,wind-wave height,0.36,no major maritime risk driver
-Turkmenbashi,2026-10-06,6,0.0234,0.0051,0.0256,0.0256,0,0,short_horizon,marine_forecast,wind-wave height,0.36,no major maritime risk driver
-Turkmenbashi,2026-10-07,7,0.0189,0.0043,0.0208,0.0208,0,0,short_horizon,marine_forecast,offshore wave height,0.3,no major maritime risk driver
-Turkmenbashi,2026-10-08,8,0.0225,0.082,0.0586,0.0586,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.85,no major maritime risk driver
-Turkmenbashi,2026-10-09,9,0.0202,0.0601,0.0467,0.0467,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.87,no major maritime risk driver
-Turkmenbashi,2026-10-10,10,0.019,0.0251,0.0301,0.0301,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.79,no major maritime risk driver
-Turkmenbashi,2026-10-11,11,0.0172,0.013,0.0229,0.0229,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.71,no major maritime risk driver
-Turkmenbashi,2026-10-12,12,0.0477,0.029,0.0601,0.0601,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.91,no major maritime risk driver
-Turkmenbashi,2026-10-13,13,0.0496,0.0171,0.0569,0.0569,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.75,no major maritime risk driver
-Turkmenbashi,2026-10-14,14,0.0356,0.0156,0.0424,0.0424,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.68,no major maritime risk driver
-Turkmenbashi,2026-10-15,15,0.0558,0.0079,0.0592,0.0592,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.51,no major maritime risk driver
-Turkmenbashi,2026-10-16,16,0.0255,0.0752,0.0585,0.0585,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.92,no major maritime risk driver
-Turkmenbashi,2026-10-17,17,0.0182,0.0692,0.0488,0.0488,0,0,climatology,wave_climatology,historical offshore wave exposure,0.87,historical city/date risk pattern
+Makhachkala,2026-11-01,1,0.0848,0.0133,0.0903,0.0903,0,0,climatology,wave_climatology,historical offshore wave exposure,0.6,historical city/date risk pattern
+Turkmenbashi,2026-10-02,2,0.0292,0.0045,0.0312,0.0312,0,0,short_horizon,marine_forecast,wind-wave height,0.3,no major maritime risk driver
+Turkmenbashi,2026-10-03,3,0.0494,0.0082,0.0529,0.0529,0,0,short_horizon,marine_forecast,wind-wave height,0.52,no major maritime risk driver
+Turkmenbashi,2026-10-04,4,0.03,0.0082,0.0336,0.0336,0,0,short_horizon,marine_forecast,wind-wave height,0.52,no major maritime risk driver
+Turkmenbashi,2026-10-05,5,0.0241,0.0045,0.0261,0.0261,0,0,short_horizon,marine_forecast,wind-wave height,0.3,no major maritime risk driver
+Turkmenbashi,2026-10-06,6,0.0233,0.0051,0.0255,0.0255,0,0,short_horizon,marine_forecast,wind-wave height,0.34,no major maritime risk driver
+Turkmenbashi,2026-10-07,7,0.0243,0.0048,0.0264,0.0264,0,0,short_horizon,marine_forecast,wind-wave height,0.34,no major maritime risk driver
+Turkmenbashi,2026-10-08,8,0.0326,0.0028,0.0339,0.0339,0,0,short_horizon,marine_forecast,offshore wave height,0.12,no major maritime risk driver
+Turkmenbashi,2026-10-09,9,0.0369,0.0601,0.063,0.063,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.87,no major maritime risk driver
+Turkmenbashi,2026-10-10,10,0.0247,0.0251,0.0357,0.0357,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.79,no major maritime risk driver
+Turkmenbashi,2026-10-11,11,0.03,0.013,0.0356,0.0356,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.71,no major maritime risk driver
+Turkmenbashi,2026-10-12,12,0.0288,0.029,0.0414,0.0414,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.91,no major maritime risk driver
+Turkmenbashi,2026-10-13,13,0.019,0.0171,0.0265,0.0265,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.75,no major maritime risk driver
+Turkmenbashi,2026-10-14,14,0.042,0.0156,0.0487,0.0487,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.68,no major maritime risk driver
+Turkmenbashi,2026-10-15,15,0.048,0.0079,0.0514,0.0514,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.51,no major maritime risk driver
+Turkmenbashi,2026-10-16,16,0.0332,0.0752,0.0659,0.0659,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.92,no major maritime risk driver
+Turkmenbashi,2026-10-17,17,0.0298,0.0692,0.06,0.06,0,0,short_horizon,wave_climatology,historical offshore wave exposure,0.87,no major maritime risk driver
 Turkmenbashi,2026-10-18,18,0.0182,0.0209,0.0274,0.0274,0,0,climatology,wave_climatology,historical offshore wave exposure,0.75,historical city/date risk pattern
 Turkmenbashi,2026-10-19,19,0.0182,0.0137,0.0242,0.0242,0,0,climatology,wave_climatology,historical offshore wave exposure,0.62,historical city/date risk pattern
 Turkmenbashi,2026-10-20,20,0.0242,0.0223,0.034,0.034,0,0,climatology,wave_climatology,historical offshore wave exposure,0.71,historical city/date risk pattern
@@ -154,3 +153,4 @@ Turkmenbashi,2026-10-28,28,0.0182,0.01,0.0226,0.0226,0,0,climatology,wave_climat
 Turkmenbashi,2026-10-29,29,0.0121,0.0082,0.0158,0.0158,0,0,climatology,wave_climatology,historical offshore wave exposure,0.53,historical city/date risk pattern
 Turkmenbashi,2026-10-30,30,0.0182,0.031,0.0319,0.0319,0,0,climatology,wave_climatology,historical offshore wave exposure,0.77,historical city/date risk pattern
 Turkmenbashi,2026-10-31,31,0.0182,0.0163,0.0254,0.0254,0,0,climatology,wave_climatology,historical offshore wave exposure,0.55,historical city/date risk pattern
+Turkmenbashi,2026-11-01,1,0.0182,0.035,0.0336,0.0336,0,0,climatology,wave_climatology,historical offshore wave exposure,0.77,historical city/date risk pattern
